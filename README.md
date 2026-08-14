@@ -10,13 +10,15 @@ GamesHub は SwiftUI で実装した、100種類のミニゲームを収録し�
 
 ## 📸 スクリーンショット
 
-| ハブ画面 | 2048 | Match3 |
+| ハブ画面 | Match 3 | Sudoku |
 |---|---|---|
-| ![hub](screenshots/final_hub.png) | ![2048](screenshots/2048_v3.png) | ![match3](screenshots/match3_v3.png) |
+| ![ハブ画面](screenshots/hub.png) | ![Match 3](screenshots/match3.png) | ![Sudoku](screenshots/sudoku.png) |
 
-| Wordle | Memory | Tower Defense |
+| Sliding Puzzle | Wordle | Flag Quiz |
 |---|---|---|
-| ![wordle](screenshots/wordle_v3.png) | ![memory](screenshots/memory_v3_final.png) | ![td](screenshots/towerdefense_v3.png) |
+| ![Sliding Puzzle](screenshots/sliding.png) | ![Wordle](screenshots/wordle.png) | ![Flag Quiz](screenshots/flagquiz.png) |
+
+> ハブの一覧から直接ゲームに入れます。以前あったバージョン選択（Base / V2 / V3）は、1本化にともない撤去しました。
 
 ---
 

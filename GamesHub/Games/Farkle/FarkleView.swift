@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Private Models
+// MARK: - Private Models ( scoped)
 
 private enum FarklePhase {
     case rolling, selecting, banked
@@ -13,7 +13,7 @@ private struct FarkleDie: Identifiable {
     var isScoring: Bool
 }
 
-// MARK: - ViewModel
+// MARK: - ViewModel ()
 
 private class FarkleViewModel: ObservableObject {
     @Published var dice: [FarkleDie] = []
@@ -24,6 +24,7 @@ private class FarkleViewModel: ObservableObject {
     @Published var rollCount: Int = 0
     @Published var isAnimating: Bool = false
     @Published var gameWon: Bool = false
+    @Published var farkleFlash: Bool = false
 
     init() {
         resetDice()
@@ -38,71 +39,66 @@ private class FarkleViewModel: ObservableObject {
         isAnimating = true
         phase = .rolling
 
-        // Re-roll non-kept dice
-        let keptCount = dice.filter { $0.isKept }.count
-        let allKept = keptCount == 6
-
+        let allKept = dice.filter { $0.isKept }.count == 6
         if allKept {
-            // Hot dice: re-roll all
             for i in dice.indices {
                 dice[i].isKept = false
                 dice[i].isScoring = false
             }
         }
 
-        // Animate roll
-        for _ in 0..<8 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.05...0.3)) {
+        // Animate tumbling
+        let animSteps = 6
+        for step in 0..<animSteps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(step) * 0.07) {
                 for i in self.dice.indices where !self.dice[i].isKept {
                     self.dice[i].value = Int.random(in: 1...6)
                 }
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            // Final roll values
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
             for i in self.dice.indices where !self.dice[i].isKept {
                 self.dice[i].value = Int.random(in: 1...6)
                 self.dice[i].isScoring = false
             }
-
             self.rollCount += 1
             self.isAnimating = false
 
-            let unKeptDice = self.dice.filter { !$0.isKept }
-            let scoringIndices = self.scoringDiceIndices(for: unKeptDice.map { $0.value })
+            let unKept = self.dice.filter { !$0.isKept }
+            let scoringIdx = self.scoringDiceIndices(for: unKept.map { $0.value })
 
-            if scoringIndices.isEmpty {
-                // FARKLE
-                self.message = "FARKLE! No scoring dice!"
+            if scoringIdx.isEmpty {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.farkleFlash = true
+                }
+                self.message = "FARKLE! Lost \(self.roundScore) pts!"
                 self.roundScore = 0
                 self.phase = .banked
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    withAnimation { self.farkleFlash = false }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
                     self.endTurn()
                 }
             } else {
                 self.phase = .selecting
-                // Mark scoring dice
-                let scoringValues = self.markScoringDice(unKeptDice: unKeptDice, scoringIndices: scoringIndices)
-                _ = scoringValues
-                self.message = "Select dice to keep, then Roll or Bank"
+                self.markScoringDice(unKeptDice: unKept, scoringIndices: scoringIdx)
+                self.message = "Select scoring dice, then Roll or Bank"
             }
         }
     }
 
-    private func markScoringDice(unKeptDice: [FarkleDie], scoringIndices: Set<Int>) -> [Int] {
+    @discardableResult
+    private func markScoringDice(unKeptDice: [FarkleDie], scoringIndices: Set<Int>) -> Bool {
         var unKeptIndex = 0
         for i in dice.indices {
             if !dice[i].isKept {
-                if scoringIndices.contains(unKeptIndex) {
-                    dice[i].isScoring = true
-                } else {
-                    dice[i].isScoring = false
-                }
+                dice[i].isScoring = scoringIndices.contains(unKeptIndex)
                 unKeptIndex += 1
             }
         }
-        return []
+        return true
     }
 
     func scoringDiceIndices(for values: [Int]) -> Set<Int> {
@@ -112,32 +108,19 @@ private class FarkleViewModel: ObservableObject {
             counts[v, default: []].append(i)
         }
 
-        // Check straight 1-6
-        if values.count == 6 {
-            let sorted = values.sorted()
-            if sorted == [1,2,3,4,5,6] {
-                return Set(0..<6)
-            }
+        // Straight
+        if values.count == 6 && values.sorted() == [1,2,3,4,5,6] {
+            return Set(0..<6)
         }
 
-        // Check three pairs
+        // Three pairs
         if values.count == 6 {
-            let countValues = counts.mapValues { $0.count }
-            let pairs = countValues.values.filter { $0 >= 2 }
-            if pairs.count == 3 || (countValues.values.filter { $0 == 2 }.count == 3) {
-                return Set(0..<6)
-            }
-            // Also handle two sets of three as three pairs (not scoring as straight)
-            let threeOfKinds = countValues.values.filter { $0 == 3 }
-            if threeOfKinds.count == 2 {
-                // Not three pairs exactly but score as triples
-            }
+            let pairCount = counts.values.filter { $0.count == 2 }.count
+            if pairCount == 3 { return Set(0..<6) }
         }
 
-        // N of a kind
         for (value, indices) in counts {
-            let count = indices.count
-            if count >= 3 {
+            if indices.count >= 3 {
                 for idx in indices { result.insert(idx) }
             } else if value == 1 || value == 5 {
                 for idx in indices { result.insert(idx) }
@@ -146,51 +129,25 @@ private class FarkleViewModel: ObservableObject {
         return result
     }
 
-    func scoreForSelection() -> Int {
-        let keptDice = dice.filter { $0.isKept }
-        return calculateScore(values: keptDice.map { $0.value })
-    }
-
     func calculateScore(values: [Int]) -> Int {
         if values.isEmpty { return 0 }
-
         var counts = [Int: Int]()
         for v in values { counts[v, default: 0] += 1 }
 
-        // Straight 1-6
-        if values.count == 6 {
-            let sorted = values.sorted()
-            if sorted == [1,2,3,4,5,6] { return 1500 }
-        }
-
-        // Three pairs
-        if values.count == 6 {
-            let pairCount = counts.values.filter { $0 == 2 }.count
-            let tripleCount = counts.values.filter { $0 == 3 }.count
-            if pairCount == 3 { return 750 }
-            if tripleCount == 2 { return 750 } // Two triples treated as three pairs? Actually score individually
-        }
+        if values.count == 6 && values.sorted() == [1,2,3,4,5,6] { return 1500 }
+        if values.count == 6 && counts.values.filter({ $0 == 2 }).count == 3 { return 750 }
 
         var score = 0
         for (value, count) in counts {
-            let threeOfKindBase = value == 1 ? 1000 : value * 100
+            let base = value == 1 ? 1000 : value * 100
             switch count {
-            case 1:
-                if value == 1 { score += 100 }
-                else if value == 5 { score += 50 }
-            case 2:
-                if value == 1 { score += 200 }
-                else if value == 5 { score += 100 }
-            case 3:
-                score += threeOfKindBase
-            case 4:
-                score += threeOfKindBase * 2
-            case 5:
-                score += threeOfKindBase * 3
-            case 6:
-                score += threeOfKindBase * 4
-            default:
-                break
+            case 1: score += value == 1 ? 100 : (value == 5 ? 50 : 0)
+            case 2: score += value == 1 ? 200 : (value == 5 ? 100 : 0)
+            case 3: score += base
+            case 4: score += base * 2
+            case 5: score += base * 3
+            case 6: score += base * 4
+            default: break
             }
         }
         return score
@@ -199,9 +156,7 @@ private class FarkleViewModel: ObservableObject {
     func toggleKeep(die: FarkleDie) {
         guard phase == .selecting, !isAnimating else { return }
         guard let idx = dice.firstIndex(where: { $0.id == die.id }) else { return }
-        if dice[idx].isKept { return } // already kept from previous roll, can't unkeep
-
-        // Can only keep scoring dice
+        guard !dice[idx].isKept else { return }
         if dice[idx].isScoring {
             dice[idx].isKept.toggle()
             updateRoundScore()
@@ -209,40 +164,35 @@ private class FarkleViewModel: ObservableObject {
     }
 
     func updateRoundScore() {
-        let keptValues = dice.filter { $0.isKept }.map { $0.value }
-        roundScore = calculateScore(values: keptValues)
+        roundScore = calculateScore(values: dice.filter { $0.isKept }.map { $0.value })
     }
 
-    func canRollAgain() -> Bool {
-        // Must have kept at least one scoring die from current roll
-        let currentRollKept = dice.filter { $0.isKept && $0.isScoring }
-        return !currentRollKept.isEmpty || dice.filter { $0.isKept }.count > 0 && dice.filter { !$0.isKept }.count > 0
-    }
-
-    func hasNewSelection() -> Bool {
-        // At least one die is kept and scoring from this roll
-        return dice.filter { $0.isKept && $0.isScoring }.count > 0 || dice.filter { $0.isKept }.count > 0
+    func rollAgain() {
+        guard phase == .selecting else { return }
+        guard dice.filter({ $0.isKept }).count > 0 else {
+            message = "Keep at least one scoring die!"
+            return
+        }
+        for i in dice.indices where dice[i].isKept {
+            dice[i].isScoring = false
+        }
+        roll()
     }
 
     func bank() {
         guard phase == .selecting else { return }
-        let keptCount = dice.filter { $0.isKept }.count
-        guard keptCount > 0 else {
-            message = "Keep at least one scoring die first!"
+        guard dice.filter({ $0.isKept }).count > 0 else {
+            message = "Keep at least one die first!"
             return
         }
         totalScore += roundScore
         phase = .banked
         if totalScore >= 10000 {
             gameWon = true
-            message = "YOU WIN! Final score: \(totalScore)"
+            message = "VICTORY! \(totalScore) pts!"
         } else {
-            message = "Banked \(roundScore) pts! Total: \(totalScore)"
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            if !self.gameWon {
-                self.endTurn()
-            }
+            message = "Banked \(roundScore)! Total: \(totalScore)"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.endTurn() }
         }
     }
 
@@ -251,279 +201,372 @@ private class FarkleViewModel: ObservableObject {
         rollCount = 0
         resetDice()
         phase = .rolling
-        if !gameWon {
-            message = "New turn! Tap Roll."
-        }
+        if !gameWon { message = "New turn — Roll!" }
     }
 
     func newGame() {
-        totalScore = 0
-        roundScore = 0
-        rollCount = 0
-        gameWon = false
-        resetDice()
-        phase = .rolling
+        totalScore = 0; roundScore = 0; rollCount = 0
+        gameWon = false; farkleFlash = false
+        resetDice(); phase = .rolling
         message = "Tap Roll to start!"
-    }
-
-    func rollAgain() {
-        guard phase == .selecting else { return }
-        let keptCount = dice.filter { $0.isKept }.count
-        guard keptCount > 0 else {
-            message = "Keep at least one scoring die!"
-            return
-        }
-        // Mark kept dice as permanently kept (not isScoring anymore for UI purposes)
-        for i in dice.indices where dice[i].isKept {
-            dice[i].isScoring = false
-        }
-        roll()
     }
 }
 
-// MARK: - Die View
+// MARK: - Glassmorphic Die View
 
 private struct FarkleDieView: View {
     let die: FarkleDie
     let onTap: () -> Void
 
+    private var glowColor: Color {
+        if die.isKept { return .green }
+        if die.isScoring { return Color(hue: 0.13, saturation: 0.9, brightness: 1.0) }
+        return .white
+    }
+
     var body: some View {
         Button(action: onTap) {
-            Image(systemName: "die.face.\(die.value).fill")
-                .font(.system(size: 52))
-                .foregroundColor(dieColor)
-                .padding(8)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(backgroundColor)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(borderColor, lineWidth: die.isKept ? 2.5 : 1)
-                )
-                .scaleEffect(die.isKept ? 1.05 : 1.0)
-                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: die.isKept)
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [glowColor.opacity(0.8), glowColor.opacity(0.2)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: die.isKept ? 2 : 1
+                            )
+                    )
+                    .shadow(color: glowColor.opacity(die.isKept ? 0.6 : (die.isScoring ? 0.4 : 0.1)), radius: die.isKept ? 14 : 6)
+
+                Image(systemName: "die.face.\(die.value).fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(
+                        die.isKept
+                        ? LinearGradient(colors: [.green, .mint], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        : (die.isScoring
+                           ? LinearGradient(colors: [Color(hue: 0.1, saturation: 1, brightness: 1), .yellow], startPoint: .topLeading, endPoint: .bottomTrailing)
+                           : LinearGradient(colors: [.white.opacity(0.9), .white.opacity(0.6)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    )
+                    .shadow(color: glowColor.opacity(0.5), radius: 4)
+            }
+            .frame(width: 90, height: 90)
+            .scaleEffect(die.isKept ? 1.06 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.55), value: die.isKept)
         }
         .buttonStyle(.plain)
     }
+}
 
-    var dieColor: Color {
-        if die.isKept { return .green }
-        if die.isScoring { return .orange }
-        return .primary
-    }
+// MARK: - Glass Card
 
-    var backgroundColor: Color {
-        if die.isKept { return Color.green.opacity(0.15) }
-        if die.isScoring { return Color.orange.opacity(0.1) }
-        return Color(.secondarySystemBackground)
-    }
+private struct FarkleGlassCard<Content: View>: View {
+    var accentColor: Color = .purple
+    @ViewBuilder var content: () -> Content
 
-    var borderColor: Color {
-        if die.isKept { return .green }
-        if die.isScoring { return .orange }
-        return Color(.separator)
+    var body: some View {
+        content()
+            .padding(16)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.4), accentColor.opacity(0.2)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: accentColor.opacity(0.35), radius: 18, x: 0, y: 6)
     }
 }
 
-// MARK: - Main View
+// MARK: - Main View 
 
 struct FarkleView: View {
     @StateObject private var vm = FarkleViewModel()
 
+    private let bgGradient = LinearGradient(
+        colors: [
+            Color(red: 0.04, green: 0.04, blue: 0.18),
+            Color(red: 0.08, green: 0.04, blue: 0.22),
+            Color(red: 0.12, green: 0.06, blue: 0.28),
+            Color(red: 0.05, green: 0.08, blue: 0.20)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+            bgGradient.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Header
-                headerView
+            // Ambient orbs
+            Circle()
+                .fill(Color.purple.opacity(0.15))
+                .frame(width: 300, height: 300)
+                .blur(radius: 60)
+                .offset(x: -80, y: -200)
+            Circle()
+                .fill(Color.blue.opacity(0.12))
+                .frame(width: 250, height: 250)
+                .blur(radius: 50)
+                .offset(x: 100, y: 200)
+
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Header card
+                    FarkleGlassCard(accentColor: .purple) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("FARKLE")
+                                    .font(.largeTitle.bold())
+                                    .foregroundStyle(
+                                        LinearGradient(colors: [.white, Color(hue: 0.75, saturation: 0.4, brightness: 1)], startPoint: .leading, endPoint: .trailing)
+                                    )
+                                Text("Race to 10,000 points")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            Spacer()
+                            Button("New Game") { vm.newGame() }
+                                .font(.subheadline.bold())
+                                .foregroundColor(.red.opacity(0.9))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(.ultraThinMaterial)
+                                .clipShape(Capsule())
+                                .overlay(Capsule().stroke(Color.red.opacity(0.4), lineWidth: 1))
+                        }
+                    }
                     .padding(.horizontal)
-                    .padding(.top, 8)
 
-                Divider().padding(.vertical, 8)
-
-                // Score info
-                scoreInfoView
+                    // Score cards
+                    HStack(spacing: 12) {
+                        scoreCard(label: "Round", value: vm.roundScore, color: Color(hue: 0.1, saturation: 0.9, brightness: 1))
+                        scoreCard(label: "Total", value: vm.totalScore, color: Color(hue: 0.6, saturation: 0.8, brightness: 1))
+                        scoreCard(label: "Goal", value: 10000, color: Color(hue: 0.35, saturation: 0.8, brightness: 0.9))
+                    }
                     .padding(.horizontal)
 
-                Divider().padding(.vertical, 8)
-
-                // Message
-                Text(vm.message)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
+                    // Progress bar
+                    FarkleGlassCard(accentColor: .cyan) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Progress")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.7))
+                                Spacer()
+                                Text("\(min(vm.totalScore, 10000)) / 10000")
+                                    .font(.caption.bold())
+                                    .foregroundColor(.cyan)
+                            }
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(.white.opacity(0.1))
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(LinearGradient(colors: [.cyan, .blue], startPoint: .leading, endPoint: .trailing))
+                                        .frame(width: geo.size.width * CGFloat(min(vm.totalScore, 10000)) / 10000.0)
+                                        .animation(.spring(), value: vm.totalScore)
+                                }
+                            }
+                            .frame(height: 8)
+                        }
+                    }
                     .padding(.horizontal)
-                    .frame(minHeight: 36)
-                    .animation(.easeInOut, value: vm.message)
 
-                Spacer(minLength: 12)
+                    // Message
+                    FarkleGlassCard(accentColor: vm.farkleFlash ? .red : .indigo) {
+                        HStack {
+                            Image(systemName: vm.farkleFlash ? "exclamationmark.triangle.fill" : "info.circle.fill")
+                                .foregroundColor(vm.farkleFlash ? .red : .purple)
+                            Text(vm.message)
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.9))
+                                .multilineTextAlignment(.leading)
+                            Spacer()
+                            Text("Roll #\(vm.rollCount)")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.4))
+                        }
+                    }
+                    .padding(.horizontal)
+                    .animation(.easeInOut(duration: 0.3), value: vm.farkleFlash)
 
-                // Dice grid
-                diceGridView
+                    // Dice grid
+                    FarkleGlassCard(accentColor: .blue) {
+                        VStack(spacing: 12) {
+                            Text("TAP SCORING DICE TO KEEP")
+                                .font(.caption2.bold())
+                                .foregroundColor(.white.opacity(0.4))
+                                .tracking(2)
+
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
+                                ForEach(vm.dice) { die in
+                                    FarkleDieView(die: die) { vm.toggleKeep(die: die) }
+                                        .transition(.asymmetric(
+                                            insertion: .scale(scale: 0.7).combined(with: .opacity),
+                                            removal: .opacity
+                                        ))
+                                }
+                            }
+                            .animation(.spring(response: 0.4, dampingFraction: 0.65), value: vm.dice.map { $0.value })
+
+                            // Legend
+                            HStack(spacing: 20) {
+                                HStack(spacing: 4) {
+                                    Circle().fill(.green).frame(width: 8, height: 8)
+                                    Text("Kept").font(.caption2).foregroundColor(.white.opacity(0.5))
+                                }
+                                HStack(spacing: 4) {
+                                    Circle().fill(Color(hue: 0.1, saturation: 1, brightness: 1)).frame(width: 8, height: 8)
+                                    Text("Scoring").font(.caption2).foregroundColor(.white.opacity(0.5))
+                                }
+                                HStack(spacing: 4) {
+                                    Circle().fill(.white.opacity(0.3)).frame(width: 8, height: 8)
+                                    Text("Dead").font(.caption2).foregroundColor(.white.opacity(0.5))
+                                }
+                            }
+                        }
+                    }
                     .padding(.horizontal)
 
-                Spacer(minLength: 12)
+                    // Action buttons
+                    actionButtons
+                        .padding(.horizontal)
 
-                // Legend
-                legendView
-                    .padding(.horizontal)
-
-                Divider().padding(.vertical, 8)
-
-                // Action buttons
-                actionButtonsView
-                    .padding(.horizontal)
-                    .padding(.bottom, 16)
+                    Spacer(minLength: 20)
+                }
+                .padding(.top, 12)
             }
 
             // Win overlay
             if vm.gameWon {
-                winOverlay
+                v2WinOverlay
             }
         }
-        .navigationTitle("Farkle")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private var headerView: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("FARKLE")
+    private func scoreCard(label: String, value: Int, color: Color) -> some View {
+        FarkleGlassCard(accentColor: color) {
+            VStack(spacing: 4) {
+                Text(label.uppercased())
+                    .font(.caption2.bold())
+                    .foregroundColor(.white.opacity(0.5))
+                    .tracking(1)
+                Text("\(value)")
                     .font(.title2.bold())
-                Text("First to 10,000 wins")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(
+                        LinearGradient(colors: [color, color.opacity(0.7)], startPoint: .top, endPoint: .bottom)
+                    )
+                    .shadow(color: color.opacity(0.5), radius: 6)
+                    .animation(.spring(), value: value)
             }
-            Spacer()
-            Button("New Game") {
-                vm.newGame()
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        if vm.phase == .rolling {
+            glowButton(label: "Roll Dice", icon: "dice", color: Color(hue: 0.65, saturation: 0.8, brightness: 0.9)) {
+                vm.roll()
             }
-            .font(.subheadline)
-            .foregroundColor(.red)
-        }
-    }
-
-    private var scoreInfoView: some View {
-        HStack(spacing: 0) {
-            scoreBox(label: "Round", value: vm.roundScore, color: .orange)
-            Divider().frame(height: 40)
-            scoreBox(label: "Total", value: vm.totalScore, color: .blue)
-            Divider().frame(height: 40)
-            scoreBox(label: "Target", value: 10000, color: .green)
-        }
-    }
-
-    private func scoreBox(label: String, value: Int, color: Color) -> some View {
-        VStack(spacing: 2) {
-            Text(label)
-                .font(.caption)
-                .foregroundColor(.secondary)
-            Text("\(value)")
-                .font(.title3.bold())
-                .foregroundColor(color)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var diceGridView: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
-            ForEach(vm.dice) { die in
-                FarkleDieView(die: die) {
-                    vm.toggleKeep(die: die)
+        } else if vm.phase == .selecting {
+            HStack(spacing: 12) {
+                glowButton(label: "Roll Again", icon: "arrow.clockwise", color: Color(hue: 0.1, saturation: 0.9, brightness: 1.0)) {
+                    vm.rollAgain()
                 }
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.8).combined(with: .opacity),
-                    removal: .opacity
-                ))
+                glowButton(label: "Bank", icon: "banknote", color: Color(hue: 0.35, saturation: 0.8, brightness: 0.8)) {
+                    vm.bank()
+                }
             }
-        }
-        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: vm.dice.map { $0.value })
-    }
-
-    private var legendView: some View {
-        HStack(spacing: 16) {
-            Label("Kept", systemImage: "checkmark.circle.fill")
-                .font(.caption)
-                .foregroundColor(.green)
-            Label("Scoring", systemImage: "star.fill")
-                .font(.caption)
-                .foregroundColor(.orange)
-            Spacer()
-            Text("Roll #\(vm.rollCount)")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private var actionButtonsView: some View {
-        HStack(spacing: 12) {
-            if vm.phase == .rolling {
-                Button(action: { vm.roll() }) {
-                    Label("Roll Dice", systemImage: "dice")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                }
-            } else if vm.phase == .selecting {
-                Button(action: { vm.rollAgain() }) {
-                    Label("Roll Again", systemImage: "arrow.clockwise")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.orange)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                }
-                Button(action: { vm.bank() }) {
-                    Label("Bank", systemImage: "banknote")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.green)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                }
-            } else {
-                // Banked phase - waiting
+        } else {
+            HStack {
                 ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
+                    .tint(.white)
+                Text("Processing...")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
             }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
 
-    private var winOverlay: some View {
+    private func glowButton(label: String, icon: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                Text(label)
+            }
+            .font(.headline.bold())
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(
+                LinearGradient(colors: [color, color.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(color: color.opacity(0.5), radius: 14, x: 0, y: 4)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(.white.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var v2WinOverlay: some View {
         ZStack {
-            Color.black.opacity(0.7).ignoresSafeArea()
-            VStack(spacing: 20) {
-                Text("🎉")
-                    .font(.system(size: 80))
-                Text("YOU WIN!")
-                    .font(.largeTitle.bold())
-                    .foregroundColor(.yellow)
+            Color.black.opacity(0.8).ignoresSafeArea()
+                .blur(radius: 0)
+
+            VStack(spacing: 24) {
+                Text("✨")
+                    .font(.system(size: 72))
+                Text("VICTORY!")
+                    .font(.system(size: 44, weight: .black))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.yellow, .orange, .pink], startPoint: .leading, endPoint: .trailing)
+                    )
+                    .shadow(color: .yellow.opacity(0.6), radius: 20)
                 Text("Final Score: \(vm.totalScore)")
-                    .font(.title2)
+                    .font(.title2.bold())
+                    .foregroundColor(.white.opacity(0.9))
+                Button("Play Again") { vm.newGame() }
+                    .font(.headline.bold())
                     .foregroundColor(.white)
-                Button("Play Again") {
-                    vm.newGame()
-                }
-                .font(.headline)
-                .padding(.horizontal, 40)
-                .padding(.vertical, 14)
-                .background(Color.green)
-                .foregroundColor(.white)
-                .cornerRadius(14)
+                    .padding(.horizontal, 48)
+                    .padding(.vertical, 16)
+                    .background(
+                        LinearGradient(colors: [.purple, .blue], startPoint: .leading, endPoint: .trailing)
+                    )
+                    .clipShape(Capsule())
+                    .shadow(color: .purple.opacity(0.6), radius: 16)
             }
             .padding(40)
-            .background(Color(.secondarySystemBackground))
-            .cornerRadius(24)
-            .shadow(radius: 20)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 28))
+            .overlay(
+                RoundedRectangle(cornerRadius: 28)
+                    .stroke(.white.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(color: .purple.opacity(0.4), radius: 30)
             .padding(24)
         }
+        .transition(.opacity)
+        .animation(.easeIn, value: vm.gameWon)
     }
 }

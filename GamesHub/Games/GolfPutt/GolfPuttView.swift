@@ -1,42 +1,51 @@
 import SwiftUI
 
-// MARK: - Models
+// MARK: - Models 
 
-enum GPGamePhase { case start, playing, result }
+enum GolfPuttPhase { case start, playing, result }
 
-struct GPHole {
+struct GolfPuttHole {
     var ballPos: CGPoint
     var holePos: CGPoint
-    var par: Int = 2
 }
 
-// MARK: - Main View
+// MARK: - Main View  (Glassmorphism + Adaptive Difficulty)
 
 struct GolfPuttView: View {
-    @State private var phase: GPGamePhase = .start
+    @State private var phase: GolfPuttPhase = .start
     @State private var currentHole: Int = 0
     @State private var totalStrokes: Int = 0
     @State private var strokesThisHole: Int = 0
-    @State private var holes: [GPHole] = GPHoleGenerator.generateHoles()
+    @State private var holes: [GolfPuttHole] = GolfPuttHoleGen.holes()
 
     @State private var ballPos: CGPoint = .zero
-    @State private var isDragging: Bool = false
-    @State private var dragStart: CGPoint = .zero
-    @State private var dragCurrent: CGPoint = .zero
     @State private var ballVelocity: CGVector = .zero
     @State private var isBallMoving: Bool = false
     @State private var holed: Bool = false
+    @State private var isDragging: Bool = false
+    @State private var dragOrigin: CGPoint = .zero
+    @State private var dragCurrent: CGPoint = .zero
+
+    // Adaptive difficulty
+    @State private var canvasSize: CGSize = UIScreen.main.bounds.size
+    @State private var recentResults: [Bool] = []
+    @State private var difficultyMultiplier: Double = 1.0
 
     let ballRadius: CGFloat = 12
     let holeRadius: CGFloat = 16
-    let maxPower: CGFloat = 120
-    let friction: CGFloat = 0.97
+    let baseFriction: CGFloat = 0.97
+    let maxPower: CGFloat = 110
 
-    var timer: Timer? { nil }
+    var friction: CGFloat { CGFloat(baseFriction * (difficultyMultiplier > 1.2 ? 0.96 : 1.0)) }
+    var effectiveHoleRadius: CGFloat { holeRadius / CGFloat(difficultyMultiplier > 1.2 ? 1.3 : 1.0) }
 
     var body: some View {
         ZStack {
-            Color(red: 0.13, green: 0.55, blue: 0.27).ignoresSafeArea()
+            LinearGradient(
+                colors: [Color(red: 0.1, green: 0.3, blue: 0.6), Color(red: 0.05, green: 0.15, blue: 0.35)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ).ignoresSafeArea()
 
             switch phase {
             case .start: startScreen
@@ -49,17 +58,26 @@ struct GolfPuttView: View {
     // MARK: - Screens
 
     var startScreen: some View {
-        VStack(spacing: 24) {
-            Text("Golf Putt").font(.system(size: 44, weight: .bold)).foregroundColor(.white)
-            Text("3 holes · Par 2 each").foregroundColor(.white.opacity(0.8))
-            Text("Drag from ball to aim & set power\nRelease to putt").multilineTextAlignment(.center).foregroundColor(.white.opacity(0.7)).font(.subheadline)
-            Button("Play") {
-                resetGame()
-                phase = .playing
+        VStack(spacing: 28) {
+            Text("Golf Putt").font(.system(size: 48, weight: .bold)).foregroundColor(.white)
+            Text("3 holes · Par 2 each").foregroundColor(.white.opacity(0.7))
+            Text("Drag from ball to aim & power\nRelease to putt")
+                .multilineTextAlignment(.center)
+                .foregroundColor(.white.opacity(0.6))
+                .font(.subheadline)
+            if difficultyMultiplier > 1.2 {
+                Label("Hard Mode Active", systemImage: "flame.fill")
+                    .foregroundColor(.orange)
+                    .font(.caption.bold())
             }
-            .buttonStyle(GPButtonStyle())
+            Button("Tee Off") { startGame() }
+                .buttonStyle(GolfPuttButtonStyle())
         }
-        .padding()
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding(32)
     }
 
     var resultScreen: some View {
@@ -67,132 +85,156 @@ struct GolfPuttView: View {
             Text("Round Complete!").font(.title.bold()).foregroundColor(.white)
             let par = holes.count * 2
             let diff = totalStrokes - par
-            Text("Total Strokes: \(totalStrokes)").font(.title2).foregroundColor(.white)
-            Text("Par: \(par)  (\(diff >= 0 ? "+" : "")\(diff))").foregroundColor(diff <= 0 ? .yellow : .white.opacity(0.7))
-            Button("Play Again") {
-                resetGame()
-                phase = .playing
+            VStack(spacing: 8) {
+                Text("Strokes: \(totalStrokes)").font(.title2.bold()).foregroundColor(.white)
+                Text("Par \(par)  \(diff >= 0 ? "+" : "")\(diff)")
+                    .foregroundColor(diff <= 0 ? .yellow : .white.opacity(0.6))
             }
-            .buttonStyle(GPButtonStyle())
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
+
+            Button("Play Again") { startGame() }
+                .buttonStyle(GolfPuttButtonStyle())
             Button("Menu") { phase = .start }
-                .foregroundColor(.white.opacity(0.7))
+                .foregroundColor(.white.opacity(0.6))
+                .padding(.top, 4)
         }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding(24)
     }
 
     var gameScreen: some View {
         VStack(spacing: 0) {
+            // HUD
             HStack {
-                Text("Hole \(currentHole + 1)/\(holes.count)").foregroundColor(.white).bold()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Hole \(currentHole + 1)/\(holes.count)").foregroundColor(.white).bold()
+                    if difficultyMultiplier > 1.2 {
+                        Text("HARD").font(.caption2.bold()).foregroundColor(.orange)
+                    }
+                }
                 Spacer()
                 Text("Strokes: \(totalStrokes + strokesThisHole)").foregroundColor(.white).bold()
             }
             .padding()
-            .background(Color.black.opacity(0.3))
+            .background(.ultraThinMaterial)
+            .overlay(Rectangle().frame(height: 1).foregroundColor(.white.opacity(0.2)), alignment: .bottom)
 
             GeometryReader { geo in
                 ZStack {
-                    // Green surface
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color(red: 0.2, green: 0.6, blue: 0.3))
-                        .padding(8)
+                    // Green
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(LinearGradient(
+                            colors: [Color(red: 0.15, green: 0.55, blue: 0.25), Color(red: 0.1, green: 0.42, blue: 0.18)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .padding(12)
+                        .shadow(color: .black.opacity(0.3), radius: 10)
 
-                    // Hole (cup)
-                    let holeCenter = scaledPoint(holes[currentHole].holePos, in: geo.size)
+                    let hc = scaledPt(holes[currentHole].holePos, geo.size)
+
+                    // Cup
                     Circle()
                         .fill(Color.black)
-                        .frame(width: holeRadius * 2, height: holeRadius * 2)
-                        .position(holeCenter)
+                        .frame(width: effectiveHoleRadius * 2, height: effectiveHoleRadius * 2)
+                        .position(hc)
 
                     // Flag
                     Path { p in
-                        p.move(to: holeCenter)
-                        p.addLine(to: CGPoint(x: holeCenter.x, y: holeCenter.y - 36))
-                        p.addLine(to: CGPoint(x: holeCenter.x + 16, y: holeCenter.y - 28))
-                        p.addLine(to: CGPoint(x: holeCenter.x, y: holeCenter.y - 20))
-                    }
-                    .stroke(Color.white, lineWidth: 2)
+                        p.move(to: hc)
+                        p.addLine(to: CGPoint(x: hc.x, y: hc.y - 38))
+                        p.addLine(to: CGPoint(x: hc.x + 18, y: hc.y - 29))
+                        p.addLine(to: CGPoint(x: hc.x, y: hc.y - 20))
+                    }.stroke(Color.white, lineWidth: 2)
 
-                    // Aim arrow
+                    // Aim line
                     if isDragging {
-                        let from = ballPos
-                        let to = dragStart
-                        let dir = CGVector(dx: to.x - from.x, dy: to.y - from.y)
-                        let dist = sqrt(dir.dx * dir.dx + dir.dy * dir.dy)
+                        let dx = dragOrigin.x - dragCurrent.x
+                        let dy = dragOrigin.y - dragCurrent.y
+                        let dist = sqrt(dx * dx + dy * dy)
                         let power = min(dist / maxPower, 1.0)
+                        if dist > 4 {
+                            Path { p in
+                                p.move(to: ballPos)
+                                p.addLine(to: CGPoint(x: ballPos.x + dx * 0.5, y: ballPos.y + dy * 0.5))
+                            }
+                            .stroke(Color.yellow.opacity(0.85), style: StrokeStyle(lineWidth: 2.5, dash: [8, 5]))
+
+                            // Power indicator dot
+                            Circle()
+                                .fill(power > 0.7 ? Color.red : Color.yellow)
+                                .frame(width: 10, height: 10)
+                                .position(CGPoint(x: ballPos.x + dx * 0.5, y: ballPos.y + dy * 0.5))
+                        }
+
                         // Power bar
                         VStack {
                             Spacer()
-                            HStack {
-                                Text("Power").foregroundColor(.white).font(.caption)
-                                GeometryReader { _ in
-                                    ZStack(alignment: .leading) {
-                                        RoundedRectangle(cornerRadius: 4).fill(Color.black.opacity(0.4)).frame(height: 10)
-                                        RoundedRectangle(cornerRadius: 4).fill(Color.yellow).frame(width: 160 * power, height: 10)
-                                    }
+                            HStack(spacing: 10) {
+                                Text("PWR").font(.caption2.bold()).foregroundColor(.white.opacity(0.7))
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(.white.opacity(0.2)).frame(width: 140, height: 10)
+                                    Capsule().fill(power > 0.7 ? Color.red : Color.yellow)
+                                        .frame(width: 140 * power, height: 10)
                                 }
-                                .frame(width: 160, height: 10)
                             }
                             .padding(.horizontal)
-                            .padding(.bottom, 12)
-                        }
-
-                        if dist > 4 {
-                            Path { p in
-                                p.move(to: from)
-                                p.addLine(to: CGPoint(x: from.x - dir.dx * 0.6, y: from.y - dir.dy * 0.6))
-                            }
-                            .stroke(Color.yellow.opacity(0.8), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                            .padding(.bottom, 16)
                         }
                     }
 
                     // Ball
                     Circle()
-                        .fill(Color.white)
+                        .fill(.white)
                         .frame(width: ballRadius * 2, height: ballRadius * 2)
-                        .shadow(radius: 3)
+                        .shadow(color: .black.opacity(0.4), radius: 4, x: 2, y: 2)
                         .position(ballPos)
 
-                    Color.clear
-                        .contentShape(Rectangle())
+                    Color.clear.contentShape(Rectangle())
                         .gesture(
                             DragGesture(minimumDistance: 0)
-                                .onChanged { val in
-                                    if !isBallMoving && !holed {
-                                        if !isDragging {
-                                            let touch = val.startLocation
-                                            let bp = ballPos
-                                            let d = hypot(touch.x - bp.x, touch.y - bp.y)
-                                            if d < 44 { isDragging = true; dragStart = val.startLocation }
-                                        }
-                                        dragCurrent = val.location
+                                .onChanged { v in
+                                    guard !isBallMoving, !holed else { return }
+                                    if !isDragging {
+                                        let d = hypot(v.startLocation.x - ballPos.x, v.startLocation.y - ballPos.y)
+                                        if d < 48 { isDragging = true; dragOrigin = v.startLocation }
                                     }
+                                    dragCurrent = v.location
                                 }
-                                .onEnded { val in
+                                .onEnded { v in
                                     if isDragging {
                                         isDragging = false
-                                        putt(from: val.startLocation, to: val.location, in: geo.size)
+                                        putt(from: v.startLocation, to: v.location, in: geo.size)
                                     }
                                 }
                         )
                 }
-                .onAppear { setupHole(in: geo.size) }
+                .onAppear {
+                    canvasSize = geo.size
+                    setupHole(in: geo.size)
+                }
+                .onChange(of: geo.size) { _, newSize in canvasSize = newSize }
             }
         }
-        .onReceive(
-            Timer.publish(every: 0.016, on: .main, in: .common).autoconnect()
-        ) { _ in tickPhysics() }
+        .onReceive(Timer.publish(every: 0.016, on: .main, in: .common).autoconnect()) { _ in tickPhysics() }
     }
 
-    // MARK: - Helpers
+    // MARK: - Logic
 
-    func scaledPoint(_ p: CGPoint, in size: CGSize) -> CGPoint {
+    func scaledPt(_ p: CGPoint, _ size: CGSize) -> CGPoint {
         CGPoint(x: p.x * size.width, y: p.y * size.height)
     }
 
     func setupHole(in size: CGSize) {
-        ballPos = scaledPoint(holes[currentHole].ballPos, in: size)
+        ballPos = scaledPt(holes[currentHole].ballPos, size)
         strokesThisHole = 0
         holed = false
+        ballVelocity = .zero
+        isBallMoving = false
     }
 
     func putt(from: CGPoint, to: CGPoint, in size: CGSize) {
@@ -201,7 +243,7 @@ struct GolfPuttView: View {
         let dy = from.y - to.y
         let dist = sqrt(dx * dx + dy * dy)
         guard dist > 4 else { return }
-        let power = min(dist / maxPower, 1.0) * 12
+        let power = min(dist / maxPower, 1.0) * 12 * CGFloat(difficultyMultiplier)
         ballVelocity = CGVector(dx: dx / dist * power, dy: dy / dist * power)
         isBallMoving = true
         strokesThisHole += 1
@@ -214,34 +256,41 @@ struct GolfPuttView: View {
         ballVelocity.dx *= friction
         ballVelocity.dy *= friction
 
-        // Check holed
-        let hp = scaledPoint(holes[currentHole].holePos, in: UIScreen.main.bounds.size)
-        let dx = ballPos.x - hp.x
-        let dy = ballPos.y - hp.y
-        if sqrt(dx * dx + dy * dy) < holeRadius {
+        // The board is the green area reported by the layout — using the whole
+        // screen here put the physical cup below the drawn one.
+        let bounds = CGRect(origin: .zero, size: canvasSize)
+        let hc = scaledPt(holes[currentHole].holePos, canvasSize)
+        let dx = ballPos.x - hc.x
+        let dy = ballPos.y - hc.y
+        if sqrt(dx * dx + dy * dy) < effectiveHoleRadius {
             holed = true
             isBallMoving = false
+            let underPar = strokesThisHole <= 2
+            recentResults.append(underPar)
+            if recentResults.count > 5 { recentResults.removeFirst() }
+            if recentResults.count == 5 && recentResults.filter({ $0 }).count > 4 {
+                difficultyMultiplier = min(difficultyMultiplier * 1.2, 2.0)
+            }
             totalStrokes += strokesThisHole
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { advanceHole() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { advanceHole() }
             return
         }
 
-        // Bounds
-        let bounds = UIScreen.main.bounds
-        if ballPos.x < ballRadius { ballPos.x = ballRadius; ballVelocity.dx = abs(ballVelocity.dx) }
-        if ballPos.x > bounds.width - ballRadius { ballPos.x = bounds.width - ballRadius; ballVelocity.dx = -abs(ballVelocity.dx) }
-        if ballPos.y < ballRadius + 60 { ballPos.y = ballRadius + 60; ballVelocity.dy = abs(ballVelocity.dy) }
-        if ballPos.y > bounds.height - ballRadius { ballPos.y = bounds.height - ballRadius; ballVelocity.dy = -abs(ballVelocity.dy) }
+        let pad: CGFloat = ballRadius + 16
+        if ballPos.x < pad { ballPos.x = pad; ballVelocity.dx = abs(ballVelocity.dx) }
+        if ballPos.x > bounds.width - pad { ballPos.x = bounds.width - pad; ballVelocity.dx = -abs(ballVelocity.dx) }
+        if ballPos.y < pad { ballPos.y = pad; ballVelocity.dy = abs(ballVelocity.dy) }
+        if ballPos.y > bounds.height - pad { ballPos.y = bounds.height - pad; ballVelocity.dy = -abs(ballVelocity.dy) }
 
-        let speed = sqrt(ballVelocity.dx * ballVelocity.dx + ballVelocity.dy * ballVelocity.dy)
-        if speed < 0.15 { isBallMoving = false; ballVelocity = .zero }
+        if sqrt(ballVelocity.dx * ballVelocity.dx + ballVelocity.dy * ballVelocity.dy) < 0.15 {
+            isBallMoving = false; ballVelocity = .zero
+        }
     }
 
     func advanceHole() {
         if currentHole + 1 < holes.count {
             currentHole += 1
-            let bounds = UIScreen.main.bounds
-            ballPos = scaledPoint(holes[currentHole].ballPos, in: bounds.size)
+            ballPos = scaledPt(holes[currentHole].ballPos, canvasSize)
             strokesThisHole = 0
             holed = false
         } else {
@@ -249,41 +298,43 @@ struct GolfPuttView: View {
         }
     }
 
-    func resetGame() {
-        holes = GPHoleGenerator.generateHoles()
+    func startGame() {
+        holes = GolfPuttHoleGen.holes()
         currentHole = 0
         totalStrokes = 0
         strokesThisHole = 0
         holed = false
         isBallMoving = false
         ballVelocity = .zero
+        phase = .playing
     }
 }
 
-// MARK: - Hole Generator
+// MARK: - Hole Generator 
 
-struct GPHoleGenerator {
-    static func generateHoles() -> [GPHole] {
+struct GolfPuttHoleGen {
+    static func holes() -> [GolfPuttHole] {
         [
-            GPHole(ballPos: CGPoint(x: 0.5, y: 0.8), holePos: CGPoint(x: 0.5, y: 0.2)),
-            GPHole(ballPos: CGPoint(x: 0.2, y: 0.75), holePos: CGPoint(x: 0.75, y: 0.25)),
-            GPHole(ballPos: CGPoint(x: 0.75, y: 0.8), holePos: CGPoint(x: 0.25, y: 0.2))
+            GolfPuttHole(ballPos: CGPoint(x: 0.5, y: 0.8), holePos: CGPoint(x: 0.5, y: 0.18)),
+            GolfPuttHole(ballPos: CGPoint(x: 0.2, y: 0.78), holePos: CGPoint(x: 0.78, y: 0.22)),
+            GolfPuttHole(ballPos: CGPoint(x: 0.78, y: 0.78), holePos: CGPoint(x: 0.22, y: 0.22))
         ]
     }
 }
 
-// MARK: - Button Style
+// MARK: - Button Style 
 
-struct GPButtonStyle: ButtonStyle {
+struct GolfPuttButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(.horizontal, 36)
+            .padding(.horizontal, 40)
             .padding(.vertical, 14)
-            .background(Color.white)
-            .foregroundColor(Color(red: 0.13, green: 0.45, blue: 0.2))
+            .background(.ultraThinMaterial)
             .clipShape(Capsule())
-            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .overlay(Capsule().stroke(.white.opacity(0.4), lineWidth: 1))
+            .foregroundColor(.white)
             .bold()
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
     }
 }
 

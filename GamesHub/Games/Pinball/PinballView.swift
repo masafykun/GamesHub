@@ -1,37 +1,44 @@
 import SwiftUI
 
 // MARK: - Models
-struct PnBBumper {
+struct PinballBumper {
     var position: CGPoint
     var isLit: Bool = false
 }
 
-enum PnBGamePhase {
+enum PinballPhase {
     case start, playing, gameOver
 }
 
-// MARK: - PinballView
+// MARK: - PinballView (Glassmorphism + Adaptive Difficulty)
 struct PinballView: View {
-    @State private var phase: PnBGamePhase = .start
+    @AppStorage("pinballBestScore") private var bestScore: Int = 0
+    @State private var phase: PinballPhase = .start
     @State private var ballPos: CGPoint = .zero
-    @State private var ballVel: CGPoint = CGPoint(x: 2.5, y: 4.0)
+    @State private var ballVel: CGPoint = CGPoint(x: 2.5, y: -5.0)
     @State private var leftFlipper: Bool = false
     @State private var rightFlipper: Bool = false
     @State private var score: Int = 0
     @State private var ballsLeft: Int = 3
-    @State private var bumpers: [PnBBumper] = []
-    @State private var timer: Timer? = nil
+    @State private var bumpers: [PinballBumper] = []
+    @State private var gameTimer: Timer? = nil
     @State private var fieldSize: CGSize = .zero
+    @State private var recentResults: [Bool] = []
+    @State private var speedMultiplier: Double = 1.0
 
     let ballRadius: CGFloat = 10
-    let flipperWidth: CGFloat = 70
+    let flipperWidth: CGFloat = 72
     let flipperHeight: CGFloat = 12
     let bumperRadius: CGFloat = 18
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                Color.black.ignoresSafeArea()
+                LinearGradient(colors: [Color(red: 0.05, green: 0.05, blue: 0.25),
+                                        Color(red: 0.15, green: 0.05, blue: 0.35)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .ignoresSafeArea()
+
                 switch phase {
                 case .start:
                     startScreen
@@ -46,34 +53,72 @@ struct PinballView: View {
         }
     }
 
-    // MARK: Start Screen
+    // MARK: - Glass Panel Helper
+    func glassPanel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
+    }
+
+    // MARK: - Start Screen
     var startScreen: some View {
-        VStack(spacing: 24) {
-            Text("PINBALL").font(.largeTitle).bold().foregroundColor(.yellow)
-            Text("3 Balls · 6 Bumpers").foregroundColor(.gray)
-            Text("Tap left/right side\nto control flippers").multilineTextAlignment(.center).foregroundColor(.white)
-            Button("PLAY") { startGame() }
-                .font(.headline).padding(.horizontal, 40).padding(.vertical, 14)
-                .background(Color.yellow).foregroundColor(.black).cornerRadius(12)
-        }
+        VStack(spacing: 28) {
+            Text("PINBALL")
+                .font(.system(size: 44, weight: .black, design: .rounded))
+                .foregroundColor(.white)
+                .shadow(color: .purple, radius: 12)
+            glassPanel {
+                VStack(spacing: 8) {
+                    Text("3 Balls · 6 Bumpers (+100 each)").foregroundColor(.white.opacity(0.9))
+                    Text("Tap left/right to flip").foregroundColor(.white.opacity(0.7)).font(.subheadline)
+                    if !recentResults.isEmpty {
+                        Text("Difficulty: \(speedMultiplier > 1.2 ? "Hard" : speedMultiplier > 1.05 ? "Medium" : "Normal")")
+                            .foregroundColor(.yellow).font(.caption).bold()
+                    }
+                }.padding(20)
+            }
+            Button { startGame() } label: {
+                Text("PLAY")
+                    .font(.headline).bold()
+                    .padding(.horizontal, 50).padding(.vertical, 16)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.5), lineWidth: 1))
+                    .foregroundColor(.white)
+            }
+        }.padding(30)
     }
 
-    // MARK: Game Over Screen
+    // MARK: - Game Over Screen
     var gameOverScreen: some View {
-        VStack(spacing: 20) {
-            Text("GAME OVER").font(.largeTitle).bold().foregroundColor(.red)
-            Text("Score: \(score)").font(.title2).foregroundColor(.white)
-            Button("PLAY AGAIN") { startGame() }
-                .font(.headline).padding(.horizontal, 40).padding(.vertical, 14)
-                .background(Color.yellow).foregroundColor(.black).cornerRadius(12)
-        }
+        VStack(spacing: 24) {
+            Text("GAME OVER")
+                .font(.system(size: 38, weight: .black)).foregroundColor(.red)
+                .shadow(color: .red, radius: 8)
+            glassPanel {
+                VStack(spacing: 6) {
+                    Text("Score: \(score)").font(.title2).bold().foregroundColor(.white)
+                    Text("Speed x\(String(format: "%.2f", speedMultiplier))").foregroundColor(.yellow).font(.caption)
+                }.padding(20)
+            }
+            Button { startGame() } label: {
+                Text("PLAY AGAIN")
+                    .font(.headline).bold()
+                    .padding(.horizontal, 40).padding(.vertical, 16)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.5), lineWidth: 1))
+                    .foregroundColor(.white)
+            }
+        }.padding(30)
     }
 
-    // MARK: Game Screen
+    // MARK: - Game Screen
     func gameScreen(geo: GeometryProxy) -> some View {
         let w = geo.size.width
         let h = geo.size.height
-        let flipY = h - 60
+        let flipY = h - 62
         let leftX = w * 0.25
         let rightX = w * 0.75
 
@@ -81,46 +126,52 @@ struct PinballView: View {
             // Bumpers
             ForEach(bumpers.indices, id: \.self) { i in
                 Circle()
-                    .fill(bumpers[i].isLit ? Color.yellow : Color.orange.opacity(0.7))
-                    .overlay(Circle().stroke(Color.white.opacity(0.5), lineWidth: 1))
+                    .fill(bumpers[i].isLit
+                          ? LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
+                          : LinearGradient(colors: [Color.purple.opacity(0.8), Color.blue.opacity(0.6)], startPoint: .top, endPoint: .bottom))
+                    .overlay(Circle().stroke(.white.opacity(0.4), lineWidth: 1.5))
                     .frame(width: bumperRadius * 2, height: bumperRadius * 2)
+                    .shadow(color: bumpers[i].isLit ? .yellow : .purple, radius: 6)
                     .position(bumpers[i].position)
             }
             // Ball
             Circle()
-                .fill(Color.white)
+                .fill(RadialGradient(colors: [.white, .cyan.opacity(0.8)], center: .topLeading, startRadius: 1, endRadius: ballRadius * 2))
                 .frame(width: ballRadius * 2, height: ballRadius * 2)
+                .shadow(color: .cyan, radius: 6)
                 .position(ballPos)
-            // Left Flipper
+            // Flippers
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.cyan)
+                .fill(LinearGradient(colors: [.cyan, .blue], startPoint: .leading, endPoint: .trailing))
                 .frame(width: flipperWidth, height: flipperHeight)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.white.opacity(0.4), lineWidth: 1))
                 .rotationEffect(.degrees(leftFlipper ? -30 : 20), anchor: .leading)
                 .position(x: leftX + flipperWidth / 2, y: flipY)
-            // Right Flipper
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.cyan)
+                .fill(LinearGradient(colors: [.blue, .cyan], startPoint: .leading, endPoint: .trailing))
                 .frame(width: flipperWidth, height: flipperHeight)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.white.opacity(0.4), lineWidth: 1))
                 .rotationEffect(.degrees(rightFlipper ? 30 : -20), anchor: .trailing)
                 .position(x: rightX - flipperWidth / 2, y: flipY)
             // HUD
             VStack {
-                HStack {
-                    Text("Score: \(score)").foregroundColor(.white).font(.headline)
-                    Spacer()
-                    Text("Balls: \(ballsLeft)").foregroundColor(.white).font(.headline)
-                }.padding(.horizontal, 20).padding(.top, 50)
+                glassPanel {
+                    HStack(spacing: 20) {
+                        Label("\(score)", systemImage: "star.fill").foregroundColor(.yellow)
+                        Spacer()
+                        Label("\(ballsLeft)", systemImage: "circle.fill").foregroundColor(.cyan)
+                    }.padding(.horizontal, 16).padding(.vertical, 8)
+                }
+                .padding(.horizontal, 16).padding(.top, 50)
                 Spacer()
             }
             // Tap zones
             HStack(spacing: 0) {
-                Color.clear
-                    .contentShape(Rectangle())
+                Color.clear.contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 0)
                         .onChanged { _ in leftFlipper = true }
                         .onEnded { _ in leftFlipper = false })
-                Color.clear
-                    .contentShape(Rectangle())
+                Color.clear.contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 0)
                         .onChanged { _ in rightFlipper = true }
                         .onEnded { _ in rightFlipper = false })
@@ -128,8 +179,14 @@ struct PinballView: View {
         }
     }
 
-    // MARK: Game Logic
+    // MARK: - Game Logic
     func startGame() {
+        // Adaptive difficulty from last 5 results
+        if recentResults.count >= 5 {
+            let last5 = recentResults.suffix(5)
+            let wins = last5.filter { $0 }.count
+            if wins > 4 { speedMultiplier = min(speedMultiplier * 1.2, 2.5) }
+        }
         score = 0
         ballsLeft = 3
         phase = .playing
@@ -141,22 +198,23 @@ struct PinballView: View {
         let w = fieldSize.width
         let h = fieldSize.height
         bumpers = [
-            PnBBumper(position: CGPoint(x: w * 0.25, y: h * 0.20)),
-            PnBBumper(position: CGPoint(x: w * 0.75, y: h * 0.20)),
-            PnBBumper(position: CGPoint(x: w * 0.50, y: h * 0.28)),
-            PnBBumper(position: CGPoint(x: w * 0.20, y: h * 0.38)),
-            PnBBumper(position: CGPoint(x: w * 0.80, y: h * 0.38)),
-            PnBBumper(position: CGPoint(x: w * 0.50, y: h * 0.46)),
+            PinballBumper(position: CGPoint(x: w * 0.25, y: h * 0.18)),
+            PinballBumper(position: CGPoint(x: w * 0.75, y: h * 0.18)),
+            PinballBumper(position: CGPoint(x: w * 0.50, y: h * 0.26)),
+            PinballBumper(position: CGPoint(x: w * 0.20, y: h * 0.36)),
+            PinballBumper(position: CGPoint(x: w * 0.80, y: h * 0.36)),
+            PinballBumper(position: CGPoint(x: w * 0.50, y: h * 0.44)),
         ]
     }
 
     func launchBall() {
         let w = fieldSize.width
         let h = fieldSize.height
-        ballPos = CGPoint(x: w / 2, y: h * 0.6)
-        ballVel = CGPoint(x: CGFloat.random(in: -2...2), y: -5)
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { _ in
+        ballPos = CGPoint(x: w / 2, y: h * 0.58)
+        let spd = speedMultiplier
+        ballVel = CGPoint(x: CGFloat.random(in: -1.5...1.5) * spd, y: -5.0 * spd)
+        gameTimer?.invalidate()
+        gameTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { _ in
             updateGame()
         }
     }
@@ -169,27 +227,25 @@ struct PinballView: View {
         var px = ballPos.x + vx
         var py = ballPos.y + vy
 
-        // Wall bounces
         if px - ballRadius < 0 { px = ballRadius; vx = abs(vx) }
         if px + ballRadius > w { px = w - ballRadius; vx = -abs(vx) }
         if py - ballRadius < 0 { py = ballRadius; vy = abs(vy) }
 
-        // Flipper collisions
-        let flipY = h - 60
+        let flipY = h - 62
         let leftX = w * 0.25
         let rightX = w * 0.75
-        let leftAngle = leftFlipper ? -30.0 : 20.0
-        let rightAngle = rightFlipper ? 30.0 : -20.0
-        if checkFlipper(px: px, py: py, flipX: leftX, flipY: flipY, angle: leftAngle, side: .left) {
-            vy = -abs(vy) - 1; vx += leftFlipper ? -1.5 : 0
+
+        if checkFlipper(px: px, py: py, flipX: leftX, flipY: flipY, angle: leftFlipper ? -30 : 20, side: .left) {
+            vy = -abs(vy) * speedMultiplier - 1
+            vx += leftFlipper ? -1.5 : 0
             py = flipY - ballRadius - 2
         }
-        if checkFlipper(px: px, py: py, flipX: rightX, flipY: flipY, angle: rightAngle, side: .right) {
-            vy = -abs(vy) - 1; vx += rightFlipper ? 1.5 : 0
+        if checkFlipper(px: px, py: py, flipX: rightX, flipY: flipY, angle: rightFlipper ? 30 : -20, side: .right) {
+            vy = -abs(vy) * speedMultiplier - 1
+            vx += rightFlipper ? 1.5 : 0
             py = flipY - ballRadius - 2
         }
 
-        // Bumper collisions
         for i in bumpers.indices {
             let dx = px - bumpers[i].position.x
             let dy = py - bumpers[i].position.y
@@ -199,19 +255,29 @@ struct PinballView: View {
                 bumpers[i].isLit = true
                 let nx = dx / dist; let ny = dy / dist
                 let dot = vx * nx + vy * ny
-                vx -= 2 * dot * nx; vy -= 2 * dot * ny
+                vx -= 2 * dot * nx * speedMultiplier
+                vy -= 2 * dot * ny * speedMultiplier
                 vy -= 1
                 px = bumpers[i].position.x + nx * (ballRadius + bumperRadius + 1)
                 py = bumpers[i].position.y + ny * (ballRadius + bumperRadius + 1)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { if i < bumpers.count { bumpers[i].isLit = false } }
+                let idx = i
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    if idx < bumpers.count { bumpers[idx].isLit = false }
+                }
             }
         }
 
-        // Ball lost
         if py > h + ballRadius {
-            timer?.invalidate()
+            gameTimer?.invalidate()
             ballsLeft -= 1
-            if ballsLeft <= 0 { phase = .gameOver } else { launchBall() }
+            if ballsLeft <= 0 {
+                bestScore = max(bestScore, score)
+                recentResults.append(score >= 500)
+                if recentResults.count > 20 { recentResults.removeFirst() }
+                phase = .gameOver
+            } else {
+                launchBall()
+            }
             return
         }
 
@@ -219,13 +285,11 @@ struct PinballView: View {
         ballVel = CGPoint(x: vx, y: vy)
     }
 
-    enum PnBSide { case left, right }
+    enum PinballSide { case left, right }
 
-    func checkFlipper(px: CGFloat, py: CGFloat, flipX: CGFloat, flipY: CGFloat, angle: Double, side: PnBSide) -> Bool {
+    func checkFlipper(px: CGFloat, py: CGFloat, flipX: CGFloat, flipY: CGFloat, angle: Double, side: PinballSide) -> Bool {
         let rad = angle * .pi / 180
-        let anchorX: CGFloat = side == .left ? flipX : flipX
-        let dx = px - anchorX
-        let dy = py - flipY
+        let dx = px - flipX; let dy = py - flipY
         let lx = dx * cos(-rad) - dy * sin(-rad)
         let ly = dx * sin(-rad) + dy * cos(-rad)
         let rangeMin: CGFloat = side == .left ? 0 : -flipperWidth

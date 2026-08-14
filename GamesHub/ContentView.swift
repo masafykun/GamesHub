@@ -5,9 +5,7 @@ struct GameEntry: Identifiable {
     let name: String
     let icon: String
     let color: Color
-    let makeBase: () -> AnyView
-    let makeV2: () -> AnyView
-    let makeV3: () -> AnyView
+    let make: () -> AnyView
 }
 
 // MARK: - Game Registry
@@ -15,214 +13,214 @@ struct GameEntry: Identifiable {
 let allGames: [GameEntry] = [
     // 1-10: Original Games
     GameEntry(name: "Flappy Bird",    icon: "bird.fill",              color: .cyan,
-              makeBase: { AnyView(FlappyView()) },      makeV2: { AnyView(FlappyViewV2()) },      makeV3: { AnyView(FlappyViewV3()) }),
+              make: { AnyView(FlappyView()) }),
     GameEntry(name: "2048",           icon: "square.grid.2x2.fill",   color: .orange,
-              makeBase: { AnyView(Puzzle2048View()) },  makeV2: { AnyView(Puzzle2048ViewV2()) },  makeV3: { AnyView(Puzzle2048ViewV3()) }),
+              make: { AnyView(Puzzle2048View()) }),
     GameEntry(name: "Wordle",         icon: "textformat.abc",          color: .green,
-              makeBase: { AnyView(WordleView()) },      makeV2: { AnyView(WordleViewV2()) },      makeV3: { AnyView(WordleViewV3()) }),
+              make: { AnyView(WordleView()) }),
     GameEntry(name: "Runner",         icon: "figure.run",              color: .purple,
-              makeBase: { AnyView(RunnerView()) },      makeV2: { AnyView(RunnerViewV2()) },      makeV3: { AnyView(RunnerViewV3()) }),
+              make: { AnyView(RunnerView()) }),
     GameEntry(name: "Match 3",        icon: "star.fill",               color: .yellow,
-              makeBase: { AnyView(Match3View()) },      makeV2: { AnyView(Match3ViewV2()) },      makeV3: { AnyView(Match3ViewV3()) }),
+              make: { AnyView(Match3View()) }),
     GameEntry(name: "Tower Defense",  icon: "shield.fill",             color: .red,
-              makeBase: { AnyView(DefenseView()) },     makeV2: { AnyView(DefenseViewV2()) },     makeV3: { AnyView(DefenseViewV3()) }),
+              make: { AnyView(DefenseView()) }),
     GameEntry(name: "Stacker",        icon: "square.stack.fill",       color: .indigo,
-              makeBase: { AnyView(StackerView()) },     makeV2: { AnyView(StackerViewV2()) },     makeV3: { AnyView(StackerViewV3()) }),
+              make: { AnyView(StackerView()) }),
     GameEntry(name: "Jumper",         icon: "arrow.up.circle.fill",    color: .teal,
-              makeBase: { AnyView(JumperView()) },      makeV2: { AnyView(JumperViewV2()) },      makeV3: { AnyView(JumperViewV3()) }),
+              make: { AnyView(JumperView()) }),
     GameEntry(name: "Dodge",          icon: "bolt.circle.fill",        color: .pink,
-              makeBase: { AnyView(DodgeView()) },       makeV2: { AnyView(DodgeViewV2()) },       makeV3: { AnyView(DodgeViewV3()) }),
+              make: { AnyView(DodgeView()) }),
     GameEntry(name: "Memory",         icon: "brain.fill",              color: .mint,
-              makeBase: { AnyView(MemoryView()) },      makeV2: { AnyView(MemoryViewV2()) },      makeV3: { AnyView(MemoryViewV3()) }),
+              make: { AnyView(MemoryView()) }),
     // 11-20
     GameEntry(name: "Snake",          icon: "point.3.connected.trianglepath.dotted", color: .green,
-              makeBase: { AnyView(SnakeView()) },       makeV2: { AnyView(SnakeViewV2()) },       makeV3: { AnyView(SnakeViewV3()) }),
+              make: { AnyView(SnakeView()) }),
     GameEntry(name: "Breakout",       icon: "rectangle.split.3x1.fill",color: .blue,
-              makeBase: { AnyView(BreakoutView()) },    makeV2: { AnyView(BreakoutViewV2()) },    makeV3: { AnyView(BreakoutViewV3()) }),
+              make: { AnyView(BreakoutView()) }),
     GameEntry(name: "Tetris Lite",    icon: "square.grid.3x3.fill",    color: .purple,
-              makeBase: { AnyView(TetrisView()) },      makeV2: { AnyView(TetrisViewV2()) },      makeV3: { AnyView(TetrisViewV3()) }),
+              make: { AnyView(TetrisView()) }),
     GameEntry(name: "Space Shooter",  icon: "airplane",                color: .cyan,
-              makeBase: { AnyView(SpaceShooterView()) },makeV2: { AnyView(SpaceShooterViewV2()) },makeV3: { AnyView(SpaceShooterViewV3()) }),
+              make: { AnyView(SpaceShooterView()) }),
     GameEntry(name: "Minesweeper",    icon: "exclamationmark.octagon.fill", color: .red,
-              makeBase: { AnyView(MinesweeperView()) }, makeV2: { AnyView(MinesweeperViewV2()) }, makeV3: { AnyView(MinesweeperViewV3()) }),
+              make: { AnyView(MinesweeperView()) }),
     GameEntry(name: "Sudoku",         icon: "grid",                    color: .orange,
-              makeBase: { AnyView(SudokuView()) },      makeV2: { AnyView(SudokuViewV2()) },      makeV3: { AnyView(SudokuViewV3()) }),
+              make: { AnyView(SudokuView()) }),
     GameEntry(name: "Simon Says",     icon: "circle.grid.2x2.fill",   color: .yellow,
-              makeBase: { AnyView(SimonView()) },       makeV2: { AnyView(SimonViewV2()) },       makeV3: { AnyView(SimonViewV3()) }),
+              make: { AnyView(SimonView()) }),
     GameEntry(name: "Whack-a-Mole",   icon: "hand.tap.fill",          color: .brown,
-              makeBase: { AnyView(WhackView()) },       makeV2: { AnyView(WhackViewV2()) },       makeV3: { AnyView(WhackViewV3()) }),
+              make: { AnyView(WhackView()) }),
     GameEntry(name: "Bubble Shooter", icon: "circle.fill",             color: .teal,
-              makeBase: { AnyView(BubbleShooterView()) },makeV2: { AnyView(BubbleShooterViewV2()) },makeV3: { AnyView(BubbleShooterViewV3()) }),
+              make: { AnyView(BubbleShooterView()) }),
     GameEntry(name: "Sliding Puzzle", icon: "rectangle.3.group.fill",  color: .indigo,
-              makeBase: { AnyView(SlidingPuzzleView()) },makeV2: { AnyView(SlidingPuzzleViewV2()) },makeV3: { AnyView(SlidingPuzzleViewV3()) }),
+              make: { AnyView(SlidingPuzzleView()) }),
     // 21-30
     GameEntry(name: "Connect Four",   icon: "circle.grid.3x3.fill",   color: .red,
-              makeBase: { AnyView(ConnectFourView()) }, makeV2: { AnyView(ConnectFourViewV2()) }, makeV3: { AnyView(ConnectFourViewV3()) }),
+              make: { AnyView(ConnectFourView()) }),
     GameEntry(name: "Tic-Tac-Toe",    icon: "xmark.square.fill",      color: .blue,
-              makeBase: { AnyView(TicTacToeView()) },   makeV2: { AnyView(TicTacToeViewV2()) },   makeV3: { AnyView(TicTacToeViewV3()) }),
+              make: { AnyView(TicTacToeView()) }),
     GameEntry(name: "Trivia",         icon: "questionmark.circle.fill",color: .purple,
-              makeBase: { AnyView(TriviaView()) },      makeV2: { AnyView(TriviaViewV2()) },      makeV3: { AnyView(TriviaViewV3()) }),
+              make: { AnyView(TriviaView()) }),
     GameEntry(name: "Color Match",    icon: "paintpalette.fill",       color: .pink,
-              makeBase: { AnyView(ColorMatchView()) },  makeV2: { AnyView(ColorMatchViewV2()) },  makeV3: { AnyView(ColorMatchViewV3()) }),
+              make: { AnyView(ColorMatchView()) }),
     GameEntry(name: "Reaction Timer", icon: "timer",                   color: .orange,
-              makeBase: { AnyView(ReactionView()) },    makeV2: { AnyView(ReactionViewV2()) },    makeV3: { AnyView(ReactionViewV3()) }),
+              make: { AnyView(ReactionView()) }),
     GameEntry(name: "Hangman",        icon: "person.fill.questionmark",color: .gray,
-              makeBase: { AnyView(HangmanView()) },     makeV2: { AnyView(HangmanViewV2()) },     makeV3: { AnyView(HangmanViewV3()) }),
+              make: { AnyView(HangmanView()) }),
     GameEntry(name: "Word Search",    icon: "magnifyingglass",         color: .teal,
-              makeBase: { AnyView(WordSearchView()) },  makeV2: { AnyView(WordSearchViewV2()) },  makeV3: { AnyView(WordSearchViewV3()) }),
+              make: { AnyView(WordSearchView()) }),
     GameEntry(name: "Anagram",        icon: "textformat",              color: .green,
-              makeBase: { AnyView(AnagramView()) },     makeV2: { AnyView(AnagramViewV2()) },     makeV3: { AnyView(AnagramViewV3()) }),
+              make: { AnyView(AnagramView()) }),
     GameEntry(name: "Lights Out",     icon: "lightbulb.fill",          color: .yellow,
-              makeBase: { AnyView(LightsOutView()) },   makeV2: { AnyView(LightsOutViewV2()) },   makeV3: { AnyView(LightsOutViewV3()) }),
+              make: { AnyView(LightsOutView()) }),
     GameEntry(name: "Pipe Connect",   icon: "arrow.triangle.turn.up.right.diamond.fill", color: .blue,
-              makeBase: { AnyView(PipeConnectView()) }, makeV2: { AnyView(PipeConnectViewV2()) }, makeV3: { AnyView(PipeConnectViewV3()) }),
+              make: { AnyView(PipeConnectView()) }),
     // 31-40
     GameEntry(name: "Color Flood",    icon: "drop.fill",               color: .cyan,
-              makeBase: { AnyView(ColorFloodView()) },  makeV2: { AnyView(ColorFloodViewV2()) },  makeV3: { AnyView(ColorFloodViewV3()) }),
+              make: { AnyView(ColorFloodView()) }),
     GameEntry(name: "Code Breaker",   icon: "lock.fill",               color: .indigo,
-              makeBase: { AnyView(CodeBreakerView()) }, makeV2: { AnyView(CodeBreakerViewV2()) }, makeV3: { AnyView(CodeBreakerViewV3()) }),
+              make: { AnyView(CodeBreakerView()) }),
     GameEntry(name: "Asteroid Dodge", icon: "sparkles",                color: .mint,
-              makeBase: { AnyView(AsteroidView()) },    makeV2: { AnyView(AsteroidViewV2()) },    makeV3: { AnyView(AsteroidViewV3()) }),
+              make: { AnyView(AsteroidView()) }),
     GameEntry(name: "Gem Catcher",    icon: "diamond.fill",            color: .pink,
-              makeBase: { AnyView(GemCatcherView()) },  makeV2: { AnyView(GemCatcherViewV2()) },  makeV3: { AnyView(GemCatcherViewV3()) }),
+              make: { AnyView(GemCatcherView()) }),
     GameEntry(name: "Gravity Switch", icon: "arrow.up.arrow.down",     color: .purple,
-              makeBase: { AnyView(GravitySwitchView()) },makeV2: { AnyView(GravitySwitchViewV2()) },makeV3: { AnyView(GravitySwitchViewV3()) }),
+              make: { AnyView(GravitySwitchView()) }),
     GameEntry(name: "Number Flow",    icon: "number",                  color: .orange,
-              makeBase: { AnyView(NumberFlowView()) },  makeV2: { AnyView(NumberFlowViewV2()) },  makeV3: { AnyView(NumberFlowViewV3()) }),
+              make: { AnyView(NumberFlowView()) }),
     GameEntry(name: "Binary Game",    icon: "01.circle.fill",          color: .green,
-              makeBase: { AnyView(BinaryGameView()) },  makeV2: { AnyView(BinaryGameViewV2()) },  makeV3: { AnyView(BinaryGameViewV3()) }),
+              make: { AnyView(BinaryGameView()) }),
     GameEntry(name: "High Low",       icon: "arrow.up.arrow.down.circle.fill", color: .red,
-              makeBase: { AnyView(HighLowView()) },     makeV2: { AnyView(HighLowViewV2()) },     makeV3: { AnyView(HighLowViewV3()) }),
+              make: { AnyView(HighLowView()) }),
     GameEntry(name: "Fruit Slice",    icon: "scissors",                color: .red,
-              makeBase: { AnyView(FruitSliceView()) },  makeV2: { AnyView(FruitSliceViewV2()) },  makeV3: { AnyView(FruitSliceViewV3()) }),
+              make: { AnyView(FruitSliceView()) }),
     GameEntry(name: "Math Blitz",     icon: "plus.forwardslash.minus", color: .blue,
-              makeBase: { AnyView(MathBlitzView()) },   makeV2: { AnyView(MathBlitzViewV2()) },   makeV3: { AnyView(MathBlitzViewV3()) }),
+              make: { AnyView(MathBlitzView()) }),
     // 41-50
     GameEntry(name: "Flick Hoops",    icon: "basketball.fill",         color: .orange,
-              makeBase: { AnyView(FlickHoopsView()) },  makeV2: { AnyView(FlickHoopsViewV2()) },  makeV3: { AnyView(FlickHoopsViewV3()) }),
+              make: { AnyView(FlickHoopsView()) }),
     GameEntry(name: "Darts",          icon: "target",                  color: .red,
-              makeBase: { AnyView(DartsView()) },       makeV2: { AnyView(DartsViewV2()) },       makeV3: { AnyView(DartsViewV3()) }),
+              make: { AnyView(DartsView()) }),
     GameEntry(name: "Golf Putt",      icon: "figure.golf",             color: .green,
-              makeBase: { AnyView(GolfPuttView()) },    makeV2: { AnyView(GolfPuttViewV2()) },    makeV3: { AnyView(GolfPuttViewV3()) }),
+              make: { AnyView(GolfPuttView()) }),
     GameEntry(name: "Archery",        icon: "arrow.right.circle.fill", color: .brown,
-              makeBase: { AnyView(ArcheryView()) },     makeV2: { AnyView(ArcheryViewV2()) },     makeV3: { AnyView(ArcheryViewV3()) }),
+              make: { AnyView(ArcheryView()) }),
     GameEntry(name: "Bowling",        icon: "figure.bowling",          color: .purple,
-              makeBase: { AnyView(BowlingView()) },     makeV2: { AnyView(BowlingViewV2()) },     makeV3: { AnyView(BowlingViewV3()) }),
+              make: { AnyView(BowlingView()) }),
     GameEntry(name: "Bubble Pop",     icon: "bubbles.and.sparkles.fill",color: .teal,
-              makeBase: { AnyView(BubblePopView()) },   makeV2: { AnyView(BubblePopViewV2()) },   makeV3: { AnyView(BubblePopViewV3()) }),
+              make: { AnyView(BubblePopView()) }),
     GameEntry(name: "Rhythm Tap",     icon: "music.note",              color: .pink,
-              makeBase: { AnyView(RhythmTapView()) },   makeV2: { AnyView(RhythmTapViewV2()) },   makeV3: { AnyView(RhythmTapViewV3()) }),
+              make: { AnyView(RhythmTapView()) }),
     GameEntry(name: "Type Race",      icon: "keyboard.fill",           color: .indigo,
-              makeBase: { AnyView(TypeRaceView()) },    makeV2: { AnyView(TypeRaceViewV2()) },    makeV3: { AnyView(TypeRaceViewV3()) }),
+              make: { AnyView(TypeRaceView()) }),
     GameEntry(name: "Color Sort",     icon: "swatchpalette.fill",      color: .cyan,
-              makeBase: { AnyView(ColorSortView()) },   makeV2: { AnyView(ColorSortViewV2()) },   makeV3: { AnyView(ColorSortViewV3()) }),
+              make: { AnyView(ColorSortView()) }),
     GameEntry(name: "Maze Runner",    icon: "map.fill",                color: .mint,
-              makeBase: { AnyView(MazeView()) },        makeV2: { AnyView(MazeViewV2()) },        makeV3: { AnyView(MazeViewV3()) }),
+              make: { AnyView(MazeView()) }),
     // 51-60
     GameEntry(name: "Laser Mirror",   icon: "rays",                    color: .yellow,
-              makeBase: { AnyView(LaserMirrorView()) }, makeV2: { AnyView(LaserMirrorViewV2()) }, makeV3: { AnyView(LaserMirrorViewV3()) }),
+              make: { AnyView(LaserMirrorView()) }),
     GameEntry(name: "Traffic Control",icon: "car.fill",                color: .red,
-              makeBase: { AnyView(TrafficView()) },     makeV2: { AnyView(TrafficViewV2()) },     makeV3: { AnyView(TrafficViewV3()) }),
+              make: { AnyView(TrafficView()) }),
     GameEntry(name: "Parking Puzzle", icon: "parkingsign.circle.fill", color: .blue,
-              makeBase: { AnyView(ParkingView()) },     makeV2: { AnyView(ParkingViewV2()) },     makeV3: { AnyView(ParkingViewV3()) }),
+              make: { AnyView(ParkingView()) }),
     GameEntry(name: "Orbit Game",     icon: "globe",                   color: .purple,
-              makeBase: { AnyView(OrbitView()) },       makeV2: { AnyView(OrbitViewV2()) },       makeV3: { AnyView(OrbitViewV3()) }),
+              make: { AnyView(OrbitView()) }),
     GameEntry(name: "Spin Target",    icon: "scope",                   color: .orange,
-              makeBase: { AnyView(SpinTargetView()) },  makeV2: { AnyView(SpinTargetViewV2()) },  makeV3: { AnyView(SpinTargetViewV3()) }),
+              make: { AnyView(SpinTargetView()) }),
     GameEntry(name: "Air Hockey",     icon: "circle.hexagongrid.fill", color: .cyan,
-              makeBase: { AnyView(AirHockeyView()) },   makeV2: { AnyView(AirHockeyViewV2()) },   makeV3: { AnyView(AirHockeyViewV3()) }),
+              make: { AnyView(AirHockeyView()) }),
     GameEntry(name: "Pinball",        icon: "circle.fill",             color: .indigo,
-              makeBase: { AnyView(PinballView()) },     makeV2: { AnyView(PinballViewV2()) },     makeV3: { AnyView(PinballViewV3()) }),
+              make: { AnyView(PinballView()) }),
     GameEntry(name: "Sokoban",        icon: "shippingbox.fill",        color: .brown,
-              makeBase: { AnyView(SokobanView()) },     makeV2: { AnyView(SokobanViewV2()) },     makeV3: { AnyView(SokobanViewV3()) }),
+              make: { AnyView(SokobanView()) }),
     GameEntry(name: "Nonogram",       icon: "squareshape.split.2x2",   color: .teal,
-              makeBase: { AnyView(NonogramView()) },    makeV2: { AnyView(NonogramViewV2()) },    makeV3: { AnyView(NonogramViewV3()) }),
+              make: { AnyView(NonogramView()) }),
     GameEntry(name: "Sand Fall",      icon: "waveform",                color: .yellow,
-              makeBase: { AnyView(SandFallView()) },    makeV2: { AnyView(SandFallViewV2()) },    makeV3: { AnyView(SandFallViewV3()) }),
+              make: { AnyView(SandFallView()) }),
     // 61-70
     GameEntry(name: "Rope Cut",       icon: "scissors.circle.fill",    color: .green,
-              makeBase: { AnyView(RopeCutView()) },     makeV2: { AnyView(RopeCutViewV2()) },     makeV3: { AnyView(RopeCutViewV3()) }),
+              make: { AnyView(RopeCutView()) }),
     GameEntry(name: "Water Flow",     icon: "drop.circle.fill",        color: .blue,
-              makeBase: { AnyView(WaterFlowView()) },   makeV2: { AnyView(WaterFlowViewV2()) },   makeV3: { AnyView(WaterFlowViewV3()) }),
+              make: { AnyView(WaterFlowView()) }),
     GameEntry(name: "Balance Ball",   icon: "level.fill",              color: .mint,
-              makeBase: { AnyView(BalanceBallView()) }, makeV2: { AnyView(BalanceBallViewV2()) }, makeV3: { AnyView(BalanceBallViewV3()) }),
+              make: { AnyView(BalanceBallView()) }),
     GameEntry(name: "Tower Climb",    icon: "arrow.up.to.line",        color: .purple,
-              makeBase: { AnyView(TowerClimbView()) },  makeV2: { AnyView(TowerClimbViewV2()) },  makeV3: { AnyView(TowerClimbViewV3()) }),
+              make: { AnyView(TowerClimbView()) }),
     GameEntry(name: "Emoji Match",    icon: "face.smiling.fill",       color: .yellow,
-              makeBase: { AnyView(EmojiMatchView()) },  makeV2: { AnyView(EmojiMatchViewV2()) },  makeV3: { AnyView(EmojiMatchViewV3()) }),
+              make: { AnyView(EmojiMatchView()) }),
     GameEntry(name: "Shadow Match",   icon: "circle.lefthalf.filled",  color: .gray,
-              makeBase: { AnyView(ShadowMatchView()) }, makeV2: { AnyView(ShadowMatchViewV2()) }, makeV3: { AnyView(ShadowMatchViewV3()) }),
+              make: { AnyView(ShadowMatchView()) }),
     GameEntry(name: "Catch Fish",     icon: "fish.fill",               color: .teal,
-              makeBase: { AnyView(CatchFishView()) },   makeV2: { AnyView(CatchFishViewV2()) },   makeV3: { AnyView(CatchFishViewV3()) }),
+              make: { AnyView(CatchFishView()) }),
     GameEntry(name: "Stack Sort",     icon: "list.number",             color: .indigo,
-              makeBase: { AnyView(StackSortView()) },   makeV2: { AnyView(StackSortViewV2()) },   makeV3: { AnyView(StackSortViewV3()) }),
+              make: { AnyView(StackSortView()) }),
     GameEntry(name: "Letter Chain",   icon: "link",                    color: .orange,
-              makeBase: { AnyView(LetterChainView()) }, makeV2: { AnyView(LetterChainViewV2()) }, makeV3: { AnyView(LetterChainViewV3()) }),
+              make: { AnyView(LetterChainView()) }),
     GameEntry(name: "Escape Code",    icon: "key.fill",                color: .red,
-              makeBase: { AnyView(EscapeCodeView()) },  makeV2: { AnyView(EscapeCodeViewV2()) },  makeV3: { AnyView(EscapeCodeViewV3()) }),
+              make: { AnyView(EscapeCodeView()) }),
     // 71-80
     GameEntry(name: "Number Merge",   icon: "plus.circle.fill",        color: .blue,
-              makeBase: { AnyView(NumberMergeView()) }, makeV2: { AnyView(NumberMergeViewV2()) }, makeV3: { AnyView(NumberMergeViewV3()) }),
+              make: { AnyView(NumberMergeView()) }),
     GameEntry(name: "Circuit Board",  icon: "cpu.fill",                color: .green,
-              makeBase: { AnyView(CircuitView()) },     makeV2: { AnyView(CircuitViewV2()) },     makeV3: { AnyView(CircuitViewV3()) }),
+              make: { AnyView(CircuitView()) }),
     GameEntry(name: "Dungeon Crawl",  icon: "sword.fill",              color: .brown,
-              makeBase: { AnyView(DungeonView()) },     makeV2: { AnyView(DungeonViewV2()) },     makeV3: { AnyView(DungeonViewV3()) }),
+              make: { AnyView(DungeonView()) }),
     GameEntry(name: "Beat the Clock", icon: "alarm.fill",              color: .red,
-              makeBase: { AnyView(BeatClockView()) },   makeV2: { AnyView(BeatClockViewV2()) },   makeV3: { AnyView(BeatClockViewV3()) }),
+              make: { AnyView(BeatClockView()) }),
     GameEntry(name: "Spot Diff",      icon: "eye.fill",                color: .teal,
-              makeBase: { AnyView(SpotDiffView()) },    makeV2: { AnyView(SpotDiffViewV2()) },    makeV3: { AnyView(SpotDiffViewV3()) }),
+              make: { AnyView(SpotDiffView()) }),
     GameEntry(name: "Crossy Hop",     icon: "hare.fill",               color: .green,
-              makeBase: { AnyView(CrossyHopView()) },   makeV2: { AnyView(CrossyHopViewV2()) },   makeV3: { AnyView(CrossyHopViewV3()) }),
+              make: { AnyView(CrossyHopView()) }),
     GameEntry(name: "Magnet Ball",    icon: "magnet.fill",             color: .purple,
-              makeBase: { AnyView(MagnetBallView()) },  makeV2: { AnyView(MagnetBallViewV2()) },  makeV3: { AnyView(MagnetBallViewV3()) }),
+              make: { AnyView(MagnetBallView()) }),
     GameEntry(name: "Brick Blast",    icon: "square.fill",             color: .orange,
-              makeBase: { AnyView(BrickBlastView()) },  makeV2: { AnyView(BrickBlastViewV2()) },  makeV3: { AnyView(BrickBlastViewV3()) }),
+              make: { AnyView(BrickBlastView()) }),
     GameEntry(name: "Zen Painter",    icon: "paintbrush.fill",         color: .mint,
-              makeBase: { AnyView(ZenPainterView()) },  makeV2: { AnyView(ZenPainterViewV2()) },  makeV3: { AnyView(ZenPainterViewV3()) }),
+              make: { AnyView(ZenPainterView()) }),
     GameEntry(name: "Gravity Puzzle", icon: "arrow.down.circle.fill",  color: .cyan,
-              makeBase: { AnyView(GravityPuzzleView()) },makeV2: { AnyView(GravityPuzzleViewV2()) },makeV3: { AnyView(GravityPuzzleViewV3()) }),
+              make: { AnyView(GravityPuzzleView()) }),
     // 81-90
     GameEntry(name: "Word Chain",     icon: "arrow.right.doc.on.clipboard", color: .blue,
-              makeBase: { AnyView(WordChainView()) },   makeV2: { AnyView(WordChainViewV2()) },   makeV3: { AnyView(WordChainViewV3()) }),
+              make: { AnyView(WordChainView()) }),
     GameEntry(name: "Memory Seq",     icon: "list.number.rtl",         color: .indigo,
-              makeBase: { AnyView(MemorySeqView()) },   makeV2: { AnyView(MemorySeqViewV2()) },   makeV3: { AnyView(MemorySeqViewV3()) }),
+              make: { AnyView(MemorySeqView()) }),
     GameEntry(name: "Prime Finder",   icon: "number.circle.fill",      color: .orange,
-              makeBase: { AnyView(PrimeFinderView()) }, makeV2: { AnyView(PrimeFinderViewV2()) }, makeV3: { AnyView(PrimeFinderViewV3()) }),
+              make: { AnyView(PrimeFinderView()) }),
     GameEntry(name: "Color Wave",     icon: "waveform.path",           color: .pink,
-              makeBase: { AnyView(ColorWaveView()) },   makeV2: { AnyView(ColorWaveViewV2()) },   makeV3: { AnyView(ColorWaveViewV3()) }),
+              make: { AnyView(ColorWaveView()) }),
     GameEntry(name: "Flip Cards",     icon: "rectangle.on.rectangle.fill", color: .red,
-              makeBase: { AnyView(FlipCardsView()) },   makeV2: { AnyView(FlipCardsViewV2()) },   makeV3: { AnyView(FlipCardsViewV3()) }),
+              make: { AnyView(FlipCardsView()) }),
     GameEntry(name: "Pic Cross",      icon: "squareshape.dotted.squareshape", color: .teal,
-              makeBase: { AnyView(PicCrossView()) },    makeV2: { AnyView(PicCrossViewV2()) },    makeV3: { AnyView(PicCrossViewV3()) }),
+              make: { AnyView(PicCrossView()) }),
     GameEntry(name: "Path Finder",    icon: "point.3.filled.connected.trianglepath.dotted", color: .mint,
-              makeBase: { AnyView(PathFinderView()) },  makeV2: { AnyView(PathFinderViewV2()) },  makeV3: { AnyView(PathFinderViewV3()) }),
+              make: { AnyView(PathFinderView()) }),
     GameEntry(name: "Infinity Hop",   icon: "infinity.circle.fill",    color: .purple,
-              makeBase: { AnyView(InfinityHopView()) }, makeV2: { AnyView(InfinityHopViewV2()) }, makeV3: { AnyView(InfinityHopViewV3()) }),
+              make: { AnyView(InfinityHopView()) }),
     GameEntry(name: "Block Push",     icon: "arrow.forward.square.fill",color: .brown,
-              makeBase: { AnyView(BlockPushView()) },   makeV2: { AnyView(BlockPushViewV2()) },   makeV3: { AnyView(BlockPushViewV3()) }),
+              make: { AnyView(BlockPushView()) }),
     GameEntry(name: "Final Gauntlet", icon: "flag.checkered.2.crossed", color: .red,
-              makeBase: { AnyView(FinalGauntletView()) },makeV2: { AnyView(FinalGauntletViewV2()) },makeV3: { AnyView(FinalGauntletViewV3()) }),
+              make: { AnyView(FinalGauntletView()) }),
     // 91-100: New Games
     GameEntry(name: "Pong",           icon: "dot.circle.fill",             color: .blue,
-              makeBase: { AnyView(PongView()) },         makeV2: { AnyView(PongViewV2()) },         makeV3: { AnyView(PongViewV3()) }),
+              make: { AnyView(PongView()) }),
     GameEntry(name: "Chain Reaction", icon: "burst.fill",                  color: .orange,
-              makeBase: { AnyView(ChainReactionView()) },makeV2: { AnyView(ChainReactionViewV2()) },makeV3: { AnyView(ChainReactionViewV3()) }),
+              make: { AnyView(ChainReactionView()) }),
     GameEntry(name: "Solitaire",      icon: "suit.spade.fill",             color: .green,
-              makeBase: { AnyView(SolitaireView()) },    makeV2: { AnyView(SolitaireViewV2()) },    makeV3: { AnyView(SolitaireViewV3()) }),
+              make: { AnyView(SolitaireView()) }),
     GameEntry(name: "Blackjack",      icon: "suit.heart.fill",             color: .red,
-              makeBase: { AnyView(BlackjackView()) },    makeV2: { AnyView(BlackjackViewV2()) },    makeV3: { AnyView(BlackjackViewV3()) }),
+              make: { AnyView(BlackjackView()) }),
     GameEntry(name: "Checkers",       icon: "checkerboard.rectangle",      color: .brown,
-              makeBase: { AnyView(CheckersView()) },     makeV2: { AnyView(CheckersViewV2()) },     makeV3: { AnyView(CheckersViewV3()) }),
+              make: { AnyView(CheckersView()) }),
     GameEntry(name: "Tower of Hanoi", icon: "pyramid.fill",                color: .purple,
-              makeBase: { AnyView(TowerHanoiView()) },   makeV2: { AnyView(TowerHanoiViewV2()) },   makeV3: { AnyView(TowerHanoiViewV3()) }),
+              make: { AnyView(TowerHanoiView()) }),
     GameEntry(name: "Farkle",         icon: "die.face.5.fill",             color: .yellow,
-              makeBase: { AnyView(FarkleView()) },       makeV2: { AnyView(FarkleViewV2()) },       makeV3: { AnyView(FarkleViewV3()) }),
+              make: { AnyView(FarkleView()) }),
     GameEntry(name: "Crossword",      icon: "squareshape.split.3x3",       color: .indigo,
-              makeBase: { AnyView(CrosswordView()) },    makeV2: { AnyView(CrosswordViewV2()) },    makeV3: { AnyView(CrosswordViewV3()) }),
+              make: { AnyView(CrosswordView()) }),
     GameEntry(name: "Flag Quiz",      icon: "flag.fill",                   color: .red,
-              makeBase: { AnyView(FlagQuizView()) },     makeV2: { AnyView(FlagQuizViewV2()) },     makeV3: { AnyView(FlagQuizViewV3()) }),
+              make: { AnyView(FlagQuizView()) }),
     GameEntry(name: "Pixel Art",      icon: "square.grid.3x3.fill",        color: .pink,
-              makeBase: { AnyView(PixelArtView()) },     makeV2: { AnyView(PixelArtViewV2()) },     makeV3: { AnyView(PixelArtViewV3()) }),
+              make: { AnyView(PixelArtView()) }),
 ]
 
 // MARK: - Content View
@@ -345,7 +343,7 @@ struct ContentView: View {
                     Text("Games Hub")
                         .font(.system(size: 40, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("100のミニゲーム · 3つのデザインスタイル")
+                    Text("100のミニゲームを、ひとつのアプリで")
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.82))
                         .multilineTextAlignment(.center)
@@ -381,9 +379,9 @@ struct ContentView: View {
         HStack(spacing: 0) {
             statPill(value: "100", label: "ゲーム", icon: "gamecontroller.fill")
             statDivider
-            statPill(value: "300", label: "体験", icon: "sparkles")
+            statPill(value: "100%", label: "SwiftUI", icon: "swift")
             statDivider
-            statPill(value: "3", label: "スタイル", icon: "paintpalette.fill")
+            statPill(value: "0", label: "広告", icon: "hand.raised.fill")
         }
         .padding(.vertical, 16)
         .background(Color(.systemBackground))
@@ -481,9 +479,6 @@ struct ContentView: View {
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Base · V2 · V3")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.78))
             }
             .padding(14)
         }
@@ -534,14 +529,9 @@ struct ContentView: View {
                     .foregroundStyle(.white)
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(game.name)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text("Base · V2 Glass · V3 Neumorphic")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
+            Text(game.name)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.primary)
 
             Spacer()
 
@@ -559,26 +549,11 @@ struct ContentView: View {
 
 struct GameDetailView: View {
     let game: GameEntry
-    @State private var selected = 0
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("Version", selection: $selected) {
-                Text("Base").tag(0)
-                Text("V2 Glass").tag(1)
-                Text("V3 Neu").tag(2)
-            }
-            .pickerStyle(.segmented)
-            .padding()
-
-            switch selected {
-            case 1: game.makeV2()
-            case 2: game.makeV3()
-            default: game.makeBase()
-            }
-        }
-        .navigationTitle(game.name)
-        .navigationBarTitleDisplayMode(.inline)
+        game.make()
+            .navigationTitle(game.name)
+            .navigationBarTitleDisplayMode(.inline)
     }
 }
 

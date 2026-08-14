@@ -1,11 +1,44 @@
 import SwiftUI
 
-enum ReactionGamePhase {
+// MARK: - Enums & Models
+
+enum ReactionPhase {
     case idle
     case waiting
     case ready
     case tapped
     case results
+}
+
+enum ReactionDifficulty: String {
+    case easy   = "Easy"
+    case medium = "Medium"
+    case hard   = "Hard"
+
+    var color: Color {
+        switch self {
+        case .easy:   return .green
+        case .medium: return .orange
+        case .hard:   return .red
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .easy:   return "tortoise.fill"
+        case .medium: return "hare.fill"
+        case .hard:   return "bolt.fill"
+        }
+    }
+
+    /// Wait-time range in seconds. Harder = tighter, shorter window = harder to predict.
+    var waitRange: ClosedRange<Double> {
+        switch self {
+        case .easy:   return 2.0...5.0
+        case .medium: return 1.2...4.0
+        case .hard:   return 0.6...2.8
+        }
+    }
 }
 
 struct ReactionRoundResult: Identifiable {
@@ -15,83 +48,204 @@ struct ReactionRoundResult: Identifiable {
     let isPenalty: Bool
 }
 
+// MARK: - Main View
+
 struct ReactionView: View {
-    @State private var phase: ReactionGamePhase = .idle
+    // Persistent cross-game tracking (adaptive difficulty)
+    @State var roundScores: [Int] = []
+    @AppStorage("reactionBestMs") private var bestMs: Int = 0
+
+    // Current game state
+    @State private var phase: ReactionPhase = .idle
     @State private var currentRound: Int = 0
     @State private var results: [ReactionRoundResult] = []
     @State private var waitTimer: Timer? = nil
     @State private var reactionStartTime: Date? = nil
-    @State private var waitDelay: Double = 0
     @State private var earlyTap: Bool = false
+    @State private var difficulty: ReactionDifficulty = .medium
+    @State private var showDifficultyBadge: Bool = false
 
     let totalRounds = 5
     let penaltyMs = 500
 
     var averageMs: Int {
         guard !results.isEmpty else { return 0 }
-        let total = results.reduce(0) { $0 + $1.milliseconds }
-        return total / results.count
+        return results.reduce(0) { $0 + $1.milliseconds } / results.count
     }
+
+    // MARK: - Body
 
     var body: some View {
         ZStack {
-            backgroundColor
+            // Animated background gradient
+            backgroundGradient
+                .ignoresSafeArea()
+                .animation(.easeInOut(duration: 0.35), value: phase)
+
+            // Tap target layer
+            Color.clear
+                .contentShape(Rectangle())
                 .ignoresSafeArea()
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onEnded { _ in handleTap() }
                 )
 
+            // Content
             VStack(spacing: 0) {
-                if phase == .idle {
+                switch phase {
+                case .idle:
                     idleView
-                } else if phase == .results {
+                case .results:
                     resultsView
-                } else {
+                default:
                     gameView
                 }
             }
+
+            // Floating difficulty badge (top-right)
+            if phase != .idle {
+                VStack {
+                    HStack {
+                        Spacer()
+                        difficultyBadge
+                            .padding(.top, 56)
+                            .padding(.trailing, 20)
+                    }
+                    Spacer()
+                }
+            }
         }
-        .animation(.easeInOut(duration: 0.2), value: phase)
+        .animation(.easeInOut(duration: 0.25), value: phase)
+        .preferredColorScheme(.dark)
     }
 
-    var backgroundColor: Color {
+    // MARK: - Background
+
+    var backgroundGradient: some View {
+        LinearGradient(
+            colors: backgroundColors,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    var backgroundColors: [Color] {
         switch phase {
         case .ready:
-            return Color.green
+            return [Color(red: 0.1, green: 0.55, blue: 0.2), Color(red: 0.05, green: 0.35, blue: 0.1)]
         case .waiting:
-            return Color(red: 0.15, green: 0.15, blue: 0.2)
+            return [Color(red: 0.08, green: 0.08, blue: 0.18), Color(red: 0.12, green: 0.10, blue: 0.22)]
         case .tapped:
-            return earlyTap ? Color.red.opacity(0.8) : Color.blue.opacity(0.7)
+            return earlyTap
+                ? [Color(red: 0.45, green: 0.05, blue: 0.05), Color(red: 0.25, green: 0.05, blue: 0.05)]
+                : [Color(red: 0.05, green: 0.18, blue: 0.42), Color(red: 0.08, green: 0.10, blue: 0.28)]
+        case .results:
+            return [Color(red: 0.06, green: 0.06, blue: 0.16), Color(red: 0.10, green: 0.08, blue: 0.22)]
         default:
-            return Color(red: 0.12, green: 0.12, blue: 0.18)
+            return [Color(red: 0.07, green: 0.07, blue: 0.17), Color(red: 0.11, green: 0.09, blue: 0.21)]
         }
     }
 
+    // MARK: - Difficulty Badge
+
+    var difficultyBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: difficulty.icon)
+                .font(.system(size: 11, weight: .bold))
+            Text(difficulty.rawValue)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+        }
+        .foregroundColor(difficulty.color)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(difficulty.color.opacity(0.5), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Idle View
+
     var idleView: some View {
-        VStack(spacing: 32) {
+        VStack(spacing: 28) {
             Spacer()
 
-            Text("Reaction Timer")
-                .font(.system(size: 36, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-
-            Text("Tap as fast as possible\nwhen the screen turns green!")
-                .font(.system(size: 18, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.75))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-
+            // Title glass card
             VStack(spacing: 12) {
-                ReactionInfoRow(icon: "circle.fill", color: .green, text: "Green = tap now!")
-                ReactionInfoRow(icon: "exclamationmark.triangle.fill", color: .yellow, text: "Early tap = +500ms penalty")
-                ReactionInfoRow(icon: "chart.bar.fill", color: .cyan, text: "5 rounds, lower average wins")
+                Image(systemName: "stopwatch.fill")
+                    .font(.system(size: 44))
+                    .foregroundColor(.green)
+
+                Text("Reaction Timer")
+                    .font(.system(size: 34, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+
+                Text(bestMs > 0 ? "Best: \(bestMs) ms" : "Tap the moment the screen turns green")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+                    .tracking(1.5)
             }
-            .padding(.vertical, 24)
-            .padding(.horizontal, 32)
-            .background(Color.white.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 28))
+            .overlay(
+                RoundedRectangle(cornerRadius: 28)
+                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+            )
             .padding(.horizontal, 24)
+
+            // Info card
+            VStack(spacing: 14) {
+                ReactionInfoRow(icon: "circle.fill", color: .green,  text: "Green screen = tap now!")
+                ReactionInfoRow(icon: "exclamationmark.triangle.fill", color: .yellow, text: "Early tap = +500ms penalty")
+                ReactionInfoRow(icon: "chart.line.uptrend.xyaxis", color: .cyan,   text: "5 rounds — lower average wins")
+                ReactionInfoRow(icon: difficulty.icon, color: difficulty.color, text: "Difficulty adapts to your skill")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 20)
+            .padding(.horizontal, 20)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+            )
+            .padding(.horizontal, 24)
+
+            // Current difficulty display
+            if !roundScores.isEmpty {
+                VStack(spacing: 4) {
+                    Text("Current difficulty")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                    HStack(spacing: 6) {
+                        Image(systemName: difficulty.icon)
+                            .font(.system(size: 13))
+                        Text(difficulty.rawValue)
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(difficulty.color)
+
+                    if roundScores.count >= 1 {
+                        Text("Moving avg: \(movingAverage)ms")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.40))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(difficulty.color.opacity(0.3), lineWidth: 1)
+                )
+                .padding(.horizontal, 24)
+            }
 
             Spacer()
 
@@ -102,101 +256,225 @@ struct ReactionView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 18)
                     .background(Color.green)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .shadow(color: Color.green.opacity(0.45), radius: 12, x: 0, y: 6)
             }
             .padding(.horizontal, 32)
-            .padding(.bottom, 48)
+            .padding(.bottom, 52)
         }
     }
+
+    // MARK: - Game View
 
     var gameView: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 0) {
+            // Round progress bar
+            roundProgressBar
+                .padding(.top, 60)
+                .padding(.horizontal, 24)
+
             Spacer()
 
+            // Central feedback
+            centralFeedback
+
+            Spacer()
+
+            // Bottom hint
+            bottomHint
+                .padding(.bottom, 52)
+        }
+    }
+
+    var roundProgressBar: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Text("Round \(currentRound) of \(totalRounds)")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+                Spacer()
+                if results.count > 0 {
+                    Text("Avg \(runningAverage)ms")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
+
+            // Pip progress
             HStack(spacing: 8) {
                 ForEach(0..<totalRounds, id: \.self) { i in
-                    Circle()
-                        .fill(i < results.count ? Color.white : Color.white.opacity(0.25))
-                        .frame(width: 14, height: 14)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(i < results.count ? Color.white : Color.white.opacity(0.2))
+                        .frame(height: 4)
+                        .animation(.easeInOut, value: results.count)
                 }
             }
-            .padding(.bottom, 8)
+        }
+        .padding(.vertical, 14)
+        .padding(.horizontal, 16)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+        )
+    }
 
-            Text("Round \(currentRound) of \(totalRounds)")
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.8))
-
-            Spacer()
-
-            VStack(spacing: 16) {
-                if phase == .waiting {
+    var centralFeedback: some View {
+        VStack(spacing: 20) {
+            switch phase {
+            case .waiting:
+                VStack(spacing: 16) {
                     Text("Wait...")
-                        .font(.system(size: 52, weight: .heavy, design: .rounded))
+                        .font(.system(size: 60, weight: .black, design: .rounded))
                         .foregroundColor(.white.opacity(0.9))
+
                     Text("Don't tap yet!")
                         .font(.system(size: 20, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.6))
-                } else if phase == .ready {
-                    Text("TAP!")
-                        .font(.system(size: 72, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
-                        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
-                } else if phase == .tapped {
-                    if earlyTap {
-                        Text("Too early!")
-                            .font(.system(size: 48, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-                        Text("+\(penaltyMs)ms penalty")
-                            .font(.system(size: 22, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.85))
-                    } else if let last = results.last {
-                        Text("\(last.milliseconds)ms")
-                            .font(.system(size: 64, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-                        Text(reactionLabel(ms: last.milliseconds))
-                            .font(.system(size: 22, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.85))
-                    }
+                        .foregroundColor(.white.opacity(0.55))
+
+                    // Animated pulsing indicator
+                    Circle()
+                        .fill(Color.white.opacity(0.08))
+                        .frame(width: 80, height: 80)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(Color.white.opacity(0.25), lineWidth: 2)
+                        )
                 }
+
+            case .ready:
+                VStack(spacing: 12) {
+                    Text("TAP!")
+                        .font(.system(size: 80, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+
+                    Text("Now!")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.85))
+                }
+
+            case .tapped:
+                tappedFeedback
+
+            default:
+                EmptyView()
             }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 44)
+        .padding(.horizontal, 32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 28))
+        .overlay(
+            RoundedRectangle(cornerRadius: 28)
+                .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+        )
+        .padding(.horizontal, 24)
+    }
 
-            Spacer()
+    var tappedFeedback: some View {
+        VStack(spacing: 14) {
+            if earlyTap {
+                Image(systemName: "hand.raised.slash.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(.red.opacity(0.9))
 
-            if phase == .tapped {
-                Text(currentRound < totalRounds ? "Tap anywhere to continue" : "Tap to see results")
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-                    .padding(.bottom, 48)
-            } else {
-                Color.clear.frame(height: 64)
+                Text("Too Early!")
+                    .font(.system(size: 44, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+
+                Text("+\(penaltyMs)ms penalty")
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .foregroundColor(.red.opacity(0.85))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.red.opacity(0.15))
+                    .clipShape(Capsule())
+            } else if let last = results.last {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 32))
+                    .foregroundColor(.green.opacity(0.9))
+
+                Text("\(last.milliseconds)ms")
+                    .font(.system(size: 64, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+
+                Text(reactionLabel(ms: last.milliseconds))
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(reactionColor(ms: last.milliseconds).opacity(0.2))
+                    .clipShape(Capsule())
             }
         }
     }
 
+    var bottomHint: some View {
+        Group {
+            if phase == .tapped {
+                Text(currentRound < totalRounds ? "Tap anywhere to continue" : "Tap to see results")
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+            } else {
+                Color.clear.frame(height: 40)
+            }
+        }
+    }
+
+    // MARK: - Results View
+
     var resultsView: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                Text("Results")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .padding(.top, 48)
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 20) {
+                // Header
+                VStack(spacing: 6) {
+                    Text("Results")
+                        .font(.system(size: 34, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("Game Complete")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.4))
+                        .tracking(2)
+                }
+                .padding(.top, 52)
 
-                ReactionScoreBadge(averageMs: averageMs)
+                // Score glass card
+                resultScoreCard
 
-                VStack(spacing: 10) {
+                // Adaptive difficulty banner
+                adaptiveDifficultyBanner
+
+                // Round list
+                VStack(spacing: 8) {
                     ForEach(results) { result in
                         ReactionRoundRow(result: result)
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 20)
 
+                // Performance label
                 Text(performanceLabel(ms: averageMs))
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.75))
+                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.65))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 24)
 
+                // Play again
                 Button(action: resetGame) {
                     Text("Play Again")
                         .font(.system(size: 22, weight: .bold, design: .rounded))
@@ -204,11 +482,105 @@ struct ReactionView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 18)
                         .background(Color.green)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                        .shadow(color: Color.green.opacity(0.45), radius: 12, x: 0, y: 6)
                 }
                 .padding(.horizontal, 32)
-                .padding(.bottom, 48)
+                .padding(.bottom, 52)
             }
+        }
+    }
+
+    var resultScoreCard: some View {
+        VStack(spacing: 10) {
+            Text("Average Reaction Time")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .tracking(1.2)
+
+            Text("\(averageMs)ms")
+                .font(.system(size: 62, weight: .black, design: .rounded))
+                .foregroundColor(.green)
+                .shadow(color: Color.green.opacity(0.4), radius: 10, x: 0, y: 4)
+
+            Text(reactionLabel(ms: averageMs))
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.8))
+
+            // Mini bar chart
+            HStack(alignment: .bottom, spacing: 6) {
+                ForEach(results) { result in
+                    VStack(spacing: 4) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(result.isPenalty ? Color.red.opacity(0.7) : reactionColor(ms: result.milliseconds))
+                            .frame(width: 30, height: barHeight(ms: result.milliseconds))
+                        Text("R\(result.round)")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                }
+            }
+            .padding(.top, 8)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .padding(.horizontal, 24)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 26))
+        .overlay(
+            RoundedRectangle(cornerRadius: 26)
+                .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+        )
+        .padding(.horizontal, 20)
+    }
+
+    var adaptiveDifficultyBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: difficulty.icon)
+                .font(.system(size: 18))
+                .foregroundColor(difficulty.color)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Next difficulty: \(difficulty.rawValue)")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text(difficultyExplainer)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+
+            Spacer()
+
+            difficultyBadge
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(difficulty.color.opacity(0.35), lineWidth: 1)
+        )
+        .padding(.horizontal, 20)
+    }
+
+    // MARK: - Computed Helpers
+
+    var runningAverage: Int {
+        guard !results.isEmpty else { return 0 }
+        return results.reduce(0) { $0 + $1.milliseconds } / results.count
+    }
+
+    var movingAverage: Int {
+        guard !roundScores.isEmpty else { return 0 }
+        return roundScores.reduce(0, +) / roundScores.count
+    }
+
+    var difficultyExplainer: String {
+        switch difficulty {
+        case .easy:   return "Wide wait window — easier to predict"
+        case .medium: return "Balanced wait window"
+        case .hard:   return "Tight, unpredictable wait window"
         }
     }
 
@@ -225,15 +597,17 @@ struct ReactionView: View {
         reactionStartTime = nil
         currentRound += 1
         phase = .waiting
-        waitDelay = Double.random(in: 1.5...4.5)
+
+        // Adaptive wait delay: use difficulty's range
+        let range = difficulty.waitRange
+        let delay = Double.random(in: range)
 
         waitTimer?.invalidate()
-        waitTimer = Timer.scheduledTimer(withTimeInterval: waitDelay, repeats: false) { _ in
+        waitTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
             DispatchQueue.main.async {
-                if self.phase == .waiting {
-                    self.phase = .ready
-                    self.reactionStartTime = Date()
-                }
+                guard self.phase == .waiting else { return }
+                self.phase = .ready
+                self.reactionStartTime = Date()
             }
         }
     }
@@ -244,7 +618,6 @@ struct ReactionView: View {
             break
 
         case .waiting:
-            // Early tap
             waitTimer?.invalidate()
             waitTimer = nil
             earlyTap = true
@@ -253,24 +626,50 @@ struct ReactionView: View {
             phase = .tapped
 
         case .ready:
-            // Valid tap
             let elapsed = Date().timeIntervalSince(reactionStartTime ?? Date())
-            let ms = Int(elapsed * 1000)
+            let ms = max(1, Int(elapsed * 1000))
             let result = ReactionRoundResult(round: currentRound, milliseconds: ms, isPenalty: false)
             results.append(result)
+            if bestMs == 0 || ms < bestMs { bestMs = ms }
             phase = .tapped
 
         case .tapped:
-            // Advance to next round or results
             if currentRound < totalRounds {
                 startRound()
             } else {
-                phase = .results
+                finalizeGame()
             }
 
         case .results:
             resetGame()
         }
+    }
+
+    func finalizeGame() {
+        // Append score, keep last 5, compute moving average, adjust difficulty
+        roundScores.append(averageMs)
+        if roundScores.count > 5 {
+            roundScores = Array(roundScores.suffix(5))
+        }
+
+        // Compute moving average over stored game scores
+        let avg = movingAverage
+
+        // Adaptive difficulty rules:
+        // Improving (avg < 220ms) → Hard
+        // Average (220..320ms)   → Medium
+        // Struggling (> 320ms)   → Easy
+        if roundScores.count >= 2 {
+            if avg < 220 {
+                difficulty = .hard
+            } else if avg < 320 {
+                difficulty = .medium
+            } else {
+                difficulty = .easy
+            }
+        }
+
+        phase = .results
     }
 
     func resetGame() {
@@ -280,6 +679,8 @@ struct ReactionView: View {
         currentRound = 0
         phase = .idle
     }
+
+    // MARK: - Label Helpers
 
     func reactionLabel(ms: Int) -> String {
         switch ms {
@@ -302,9 +703,25 @@ struct ReactionView: View {
         default: return "There's room to improve — try again!"
         }
     }
+
+    func reactionColor(ms: Int) -> Color {
+        switch ms {
+        case ..<200: return .green
+        case 200..<300: return .cyan
+        case 300..<400: return .orange
+        default: return .red
+        }
+    }
+
+    func barHeight(ms: Int) -> CGFloat {
+        // Clamp ms to a visible bar range (50–600ms → 8–56pt)
+        let clamped = min(max(ms, 50), 600)
+        let ratio = Double(clamped - 50) / Double(600 - 50)
+        return CGFloat(8 + ratio * 48)
+    }
 }
 
-// MARK: - Subviews
+// MARK: - Sub-views
 
 struct ReactionInfoRow: View {
     let icon: String
@@ -315,35 +732,12 @@ struct ReactionInfoRow: View {
         HStack(spacing: 14) {
             Image(systemName: icon)
                 .foregroundColor(color)
-                .frame(width: 24)
+                .frame(width: 22)
             Text(text)
-                .font(.system(size: 15, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.85))
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.82))
             Spacer()
         }
-    }
-}
-
-struct ReactionScoreBadge: View {
-    let averageMs: Int
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Text("Average")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.65))
-            Text("\(averageMs)ms")
-                .font(.system(size: 56, weight: .heavy, design: .rounded))
-                .foregroundColor(.green)
-            Text("reaction time")
-                .font(.system(size: 14, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
-        .background(Color.white.opacity(0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 24))
-        .padding(.horizontal, 24)
     }
 }
 
@@ -351,31 +745,47 @@ struct ReactionRoundRow: View {
     let result: ReactionRoundResult
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
+            // Round number bubble
+            Text("\(result.round)")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
+                .frame(width: 28, height: 28)
+                .background(Color.white.opacity(0.1))
+                .clipShape(Circle())
+
             Text("Round \(result.round)")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.75))
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.72))
 
             Spacer()
 
             if result.isPenalty {
                 Label("Penalty", systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundColor(.yellow)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.yellow.opacity(0.12))
+                    .clipShape(Capsule())
             }
 
             Text("\(result.milliseconds)ms")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundColor(result.isPenalty ? .yellow : reactionColor(ms: result.milliseconds))
-                .frame(minWidth: 80, alignment: .trailing)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundColor(result.isPenalty ? .yellow : rowColor(ms: result.milliseconds))
+                .frame(minWidth: 72, alignment: .trailing)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .background(Color.white.opacity(0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
+        )
     }
 
-    func reactionColor(ms: Int) -> Color {
+    func rowColor(ms: Int) -> Color {
         switch ms {
         case ..<200: return .green
         case 200..<300: return .cyan

@@ -22,6 +22,10 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         CFBundleDisplayName: GamesHub
+        # Info.plist を自前で持つ構成では、Xcode が CFBundleIconName を
+        # 入れてくれないので明示する。これが無いとアイコンが出ない
+        CFBundleIconName: AppIcon
     settings:
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       INFOPLIST_FILE: GamesHub/Info.plist
       PRODUCT_BUNDLE_IDENTIFIER: com.gameshub.GamesHub

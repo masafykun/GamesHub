@@ -2,12 +2,12 @@ import SwiftUI
 
 // MARK: - Models
 
-enum TRcGamePhase {
+enum TypeRacePhase {
     case start, playing, finished
 }
 
-struct TRcWordList {
-    static let words: [String] = [
+struct TypeRaceWords {
+    static let pool: [String] = [
         "the", "be", "to", "of", "and", "a", "in", "that", "have", "it",
         "for", "not", "on", "with", "he", "as", "you", "do", "at", "this",
         "but", "his", "by", "from", "they", "we", "say", "her", "she", "or",
@@ -18,14 +18,31 @@ struct TRcWordList {
         "them", "see", "other", "than", "then", "now", "look", "only", "come",
         "its", "over", "think", "also", "back", "after", "use", "two", "how",
         "our", "work", "first", "well", "way", "even", "new", "want", "because",
-        "any", "these", "give", "day", "most", "us", "great", "between", "need"
+        "any", "these", "give", "day", "most", "between", "journey", "reflect",
+        "dynamic", "system", "process", "result", "method", "factor", "balance"
     ]
+}
+
+struct TRcDifficultyConfig {
+    var timeLimitEnabled: Bool
+    var timeLimit: Double  // seconds per word, 0 = no limit
+    var minWordLength: Int
+
+    static let easy = TRcDifficultyConfig(timeLimitEnabled: false, timeLimit: 0, minWordLength: 0)
+
+    func increased() -> TRcDifficultyConfig {
+        TRcDifficultyConfig(
+            timeLimitEnabled: true,
+            timeLimit: max(2.0, (timeLimit == 0 ? 5.0 : timeLimit) * 0.8),
+            minWordLength: minWordLength + 1
+        )
+    }
 }
 
 // MARK: - Main View
 
 struct TypeRaceView: View {
-    @State private var phase: TRcGamePhase = .start
+    @State private var phase: TypeRacePhase = .start
     @State private var wordQueue: [String] = []
     @State private var currentIndex: Int = 0
     @State private var userInput: String = ""
@@ -33,9 +50,15 @@ struct TypeRaceView: View {
     @State private var totalCharsTyped: Int = 0
     @State private var correctCharsTyped: Int = 0
     @State private var startTime: Date = Date()
+    @State private var recentResults: [Bool] = []
+    @State private var config: TRcDifficultyConfig = .easy
+    @State private var wordStartTime: Date = Date()
+    @State private var timeRemaining: Double = 0
+    @State private var timer: Timer? = nil
     @FocusState private var fieldFocused: Bool
 
     private let totalWords = 20
+    private let gradientColors: [Color] = [Color(red: 0.3, green: 0.1, blue: 0.7), Color(red: 0.1, green: 0.4, blue: 0.9)]
 
     var currentWord: String {
         guard currentIndex < wordQueue.count else { return "" }
@@ -53,9 +76,18 @@ struct TypeRaceView: View {
         return Double(correctCharsTyped) / Double(totalCharsTyped) * 100.0
     }
 
+    var difficultyLabel: String {
+        if !config.timeLimitEnabled { return "Easy" }
+        let limit = config.timeLimit
+        if limit >= 4 { return "Medium" }
+        if limit >= 3 { return "Hard" }
+        return "Expert"
+    }
+
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+            LinearGradient(colors: gradientColors, startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
 
             switch phase {
             case .start:
@@ -72,56 +104,87 @@ struct TypeRaceView: View {
 
     var startScreen: some View {
         VStack(spacing: 32) {
-            Text("TypeRace")
-                .font(.system(size: 44, weight: .bold, design: .rounded))
-                .foregroundColor(.primary)
+            VStack(spacing: 8) {
+                Text("TypeRace")
+                    .font(.system(size: 46, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Adaptive Edition")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.7))
+                    .tracking(2)
+            }
 
-            Text("Type 20 words as fast as you can.\nHit return after each word.")
-                .font(.body)
+            glassCard {
+                VStack(spacing: 10) {
+                    Text("Type 20 words as fast as you can.")
+                        .font(.body)
+                        .foregroundColor(.white.opacity(0.9))
+                    Text("Performance-based difficulty adapts in real-time.")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.6))
+                }
                 .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
                 .padding(.horizontal)
+            }
 
             Button(action: startGame) {
-                Text("Start")
-                    .font(.title2.bold())
+                Text("Start Racing")
+                    .font(.title3.bold())
                     .foregroundColor(.white)
-                    .frame(width: 180, height: 54)
-                    .background(Color.blue)
+                    .frame(width: 200, height: 52)
+                    .background(Color.white.opacity(0.2))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.4), lineWidth: 1))
             }
         }
         .padding()
     }
 
     var playingScreen: some View {
-        VStack(spacing: 28) {
+        VStack(spacing: 20) {
             HStack {
-                Text("\(currentIndex)/\(totalWords)")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundColor(.secondary)
+                glassTag(text: "\(currentIndex)/\(totalWords)")
                 Spacer()
-                Text("\(correctWords) correct")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundColor(.green)
+                glassTag(text: difficultyLabel)
+                Spacer()
+                glassTag(text: "\(correctWords) correct")
             }
             .padding(.horizontal)
 
+            if config.timeLimitEnabled && timeRemaining > 0 {
+                TypeRaceTimerBar(progress: timeRemaining / config.timeLimit, color: timeBarColor)
+                    .frame(height: 6)
+                    .padding(.horizontal)
+            }
+
             Spacer()
 
-            Text(currentWord)
-                .font(.system(size: 52, weight: .bold, design: .monospaced))
-                .foregroundColor(.primary)
-                .padding(24)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color(.secondarySystemBackground))
-                )
-                .padding(.horizontal)
+            glassCard {
+                Text(currentWord)
+                    .font(.system(size: 48, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.vertical, 12)
+            }
+            .padding(.horizontal)
 
-            TRcInputField(text: $userInput, onSubmit: submitWord)
-                .focused($fieldFocused)
-                .padding(.horizontal)
+            glassCard {
+                TextField("Type here...", text: $userInput)
+                    .font(.title3.monospaced())
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.white)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($fieldFocused)
+                    .onSubmit { submitWord() }
+                    .onChange(of: userInput) { newValue in
+                        if newValue.last == " " {
+                            userInput = String(newValue.dropLast())
+                            submitWord()
+                        }
+                    }
+                    .padding(.vertical, 4)
+            }
+            .padding(.horizontal)
 
             Spacer()
         }
@@ -131,45 +194,117 @@ struct TypeRaceView: View {
 
     var finishedScreen: some View {
         VStack(spacing: 24) {
-            Text("Finished!")
+            Text("Race Over!")
                 .font(.system(size: 40, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
 
-            VStack(spacing: 12) {
-                TRcStatRow(label: "WPM", value: String(format: "%.1f", wpm))
-                TRcStatRow(label: "Accuracy", value: String(format: "%.1f%%", accuracy))
-                TRcStatRow(label: "Correct Words", value: "\(correctWords)/\(totalWords)")
+            glassCard {
+                VStack(spacing: 16) {
+                    TypeRaceResultRow(label: "WPM", value: String(format: "%.1f", wpm), color: .yellow)
+                    TypeRaceResultRow(label: "Accuracy", value: String(format: "%.1f%%", accuracy), color: .green)
+                    TypeRaceResultRow(label: "Correct", value: "\(correctWords)/\(totalWords)", color: .white)
+                    TypeRaceResultRow(label: "Peak Difficulty", value: difficultyLabel, color: .orange)
+                }
+                .padding(8)
             }
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(.secondarySystemBackground))
-            )
             .padding(.horizontal)
 
             Button(action: startGame) {
-                Text("Play Again")
-                    .font(.title2.bold())
+                Text("Race Again")
+                    .font(.title3.bold())
                     .foregroundColor(.white)
-                    .frame(width: 180, height: 54)
-                    .background(Color.blue)
+                    .frame(width: 200, height: 52)
+                    .background(Color.white.opacity(0.2))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.4), lineWidth: 1))
             }
         }
         .padding()
     }
 
+    // MARK: - Glass Helpers
+
+    @ViewBuilder
+    func glassCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(16)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    func glassTag(text: String) -> some View {
+        Text(text)
+            .font(.caption.monospacedDigit())
+            .foregroundColor(.white.opacity(0.9))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 1))
+    }
+
+    var timeBarColor: Color {
+        guard config.timeLimit > 0 else { return .green }
+        let ratio = timeRemaining / config.timeLimit
+        if ratio > 0.6 { return .green }
+        if ratio > 0.3 { return .yellow }
+        return .red
+    }
+
     // MARK: - Actions
 
     func startGame() {
-        wordQueue = Array(TRcWordList.words.shuffled().prefix(totalWords))
+        let filtered = config.minWordLength > 0
+            ? TypeRaceWords.pool.filter { $0.count >= config.minWordLength }
+            : TypeRaceWords.pool
+        let source = filtered.isEmpty ? TypeRaceWords.pool : filtered
+        wordQueue = Array(source.shuffled().prefix(totalWords))
         currentIndex = 0
         userInput = ""
         correctWords = 0
         totalCharsTyped = 0
         correctCharsTyped = 0
+        recentResults = []
+        config = .easy
         startTime = Date()
         phase = .playing
         fieldFocused = true
+        startWordTimer()
+    }
+
+    func startWordTimer() {
+        timer?.invalidate()
+        timer = nil
+        wordStartTime = Date()
+        guard config.timeLimitEnabled, config.timeLimit > 0 else { return }
+        timeRemaining = config.timeLimit
+        timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            let elapsed = Date().timeIntervalSince(wordStartTime)
+            timeRemaining = max(0, config.timeLimit - elapsed)
+            if timeRemaining <= 0 {
+                skipWord(correct: false)
+            }
+        }
+    }
+
+    func skipWord(correct: Bool) {
+        timer?.invalidate()
+        timer = nil
+        recentResults.append(correct)
+        if !correct {
+            totalCharsTyped += currentWord.count
+        }
+        userInput = ""
+        currentIndex += 1
+        checkDifficultyAdaptation()
+        if currentIndex >= totalWords {
+            phase = .finished
+            fieldFocused = false
+        } else {
+            startWordTimer()
+        }
     }
 
     func submitWord() {
@@ -187,60 +322,56 @@ struct TypeRaceView: View {
             }
         }
         correctCharsTyped += correct
-        if typed == target { correctWords += 1 }
-        userInput = ""
-        currentIndex += 1
-        if currentIndex >= totalWords {
-            phase = .finished
-            fieldFocused = false
+        let isCorrect = typed == target
+        if isCorrect { correctWords += 1 }
+        skipWord(correct: isCorrect)
+    }
+
+    func checkDifficultyAdaptation() {
+        guard recentResults.count >= 5 else { return }
+        let last5 = recentResults.suffix(5)
+        let trueCount = last5.filter { $0 }.count
+        if trueCount > 4 {
+            config = config.increased()
+            recentResults = []
         }
     }
 }
 
 // MARK: - Supporting Views
 
-struct TRcInputField: View {
-    @Binding var text: String
-    var onSubmit: () -> Void
+struct TypeRaceTimerBar: View {
+    let progress: Double
+    let color: Color
 
     var body: some View {
-        TextField("Type here...", text: $text)
-            .font(.title3.monospaced())
-            .multilineTextAlignment(.center)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(.tertiarySystemBackground))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.blue.opacity(0.5), lineWidth: 1.5)
-                    )
-            )
-            .onSubmit { onSubmit() }
-            .onChange(of: text) { newValue in
-                if newValue.last == " " {
-                    text = String(newValue.dropLast())
-                    onSubmit()
-                }
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(.white.opacity(0.15))
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(color)
+                    .frame(width: geo.size.width * max(0, min(1, progress)))
+                    .animation(.linear(duration: 0.05), value: progress)
             }
+        }
     }
 }
 
-struct TRcStatRow: View {
+struct TypeRaceResultRow: View {
     let label: String
     let value: String
+    let color: Color
 
     var body: some View {
         HStack {
             Text(label)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(.white.opacity(0.7))
             Spacer()
             Text(value)
                 .font(.subheadline.bold().monospacedDigit())
-                .foregroundColor(.primary)
+                .foregroundColor(color)
         }
         .padding(.horizontal, 8)
     }

@@ -1,50 +1,62 @@
 import SwiftUI
 
-// MARK: - Word List
-let wordleWordList = ["SWIFT", "CRANE", "SLATE", "APPLE", "BRAVE", "FLAME", "GHOST", "HONEY", "IVORY", "JOKER", "KNIFE", "LEMON", "MAPLE", "NIGHT", "OCEAN", "PIANO", "QUEST", "RIVER", "STONE", "TOWER", "ULTRA", "VAPOR", "WITTY", "XENON", "YACHT", "ZEBRA", "BREAD", "CLOUD", "DANCE", "EARTH", "FRESH", "GRAPE", "HAPPY", "IDEAL", "JUICE", "KINGS", "LIGHT", "MOUNT", "NOVEL", "OUTER", "PEACH", "QUEEN", "ROYAL", "SUGAR", "TIGER", "UNDER", "VIOLA", "WATCH", "EXTRA", "YUMMY", "AMBER", "BLOOM", "CRISP", "DRANK", "EAGLE", "FROWN", "GIANT", "HOTEL", "INPUT", "JAZZY"]
+// MARK: - Word Lists
+
+private let wordleEasyWords: [String] = [
+    "ADDED", "AIMED", "AIRED", "ATOMS", "BEADS", "BEATS", "BELLS", "BIKES",
+    "BIRDS", "BITES", "BLEND", "BONES", "BOOKS", "BOOTS", "BOXES", "BURNS",
+    "CALLS", "CARDS", "CASES", "CAVES", "CELLS", "CHIPS", "CHOSE", "CITED",
+    "CLIPS", "CODES", "COINS", "COOKS", "CORES", "COSTS", "COVER", "CRABS",
+    "DATES", "DEALS", "DIALS", "DOORS", "DROPS", "DRUMS", "DUSTS", "EDGES",
+    "ELBOW", "ENTER", "ERODE", "FACES", "FACTS", "FALLS", "FARMS", "FEELS",
+    "FEEDS", "FILES", "FILLS", "FINDS", "FIRES", "FLIES", "FLOOR", "FLOWS",
+    "FOLKS", "FOODS", "FORMS", "FOUND"
+]
+
+private let wordleHardWords: [String] = [
+    "WALTZ", "EPOXY", "FJORD", "GLYPH", "PSYCH", "TRYST", "CRYPT",
+    "PYGMY", "LYNCH", "GRAFT", "BLITZ", "FRITZ", "ABYSS", "SQUIB",
+    "NYMPH", "BORAX", "EXPAT", "AXIOM", "INFIX", "ANNEX", "ERGOT", "BLEAT",
+    "AMBIT", "VYING", "MIRTH", "STOIC", "NATAL", "REDUX", "ETHOS", "NEXUS",
+    "ANGST", "REBUT", "GUILE", "INEPT", "VAPID", "TACIT", "PREEN", "BERTH",
+    "FOYER", "GROUT", "SNOUT", "TROVE", "QUIRK", "KNACK", "BRINK", "CLEFT",
+    "DWELT", "ENVOY", "EXPEL", "FETID", "GAUNT", "HOIST", "INANE", "JOUST",
+    "KINKY", "LARVA", "MUTED", "NADIR", "OPTIC", "PATSY", "QUAFF", "RELIC"
+]
 
 // MARK: - Enums
 
 enum WordleTileState {
-    case empty
-    case correct
-    case present
-    case absent
+    case empty, correct, present, absent
 
     var backgroundColor: Color {
         switch self {
-        case .empty:   return Color(.systemBackground)
-        case .correct: return Color(red: 0.38, green: 0.65, blue: 0.40) // green
-        case .present: return Color(red: 0.79, green: 0.69, blue: 0.29) // yellow
-        case .absent:  return Color(red: 0.47, green: 0.49, blue: 0.51) // gray
+        case .empty:   return Color.white.opacity(0.08)
+        case .correct: return Color(red: 0.25, green: 0.72, blue: 0.48)
+        case .present: return Color(red: 0.88, green: 0.72, blue: 0.20)
+        case .absent:  return Color.white.opacity(0.25)
         }
     }
 
-    var foregroundColor: Color {
-        switch self {
-        case .empty:   return .primary
-        default:       return .white
-        }
-    }
+    var foregroundColor: Color { .white }
 
     var borderColor: Color {
         switch self {
-        case .empty: return Color(.systemGray3)
+        case .empty: return Color.white.opacity(0.30)
         default:     return .clear
         }
     }
 }
 
+enum WordleGameState { case playing, won, lost }
+enum WordleDifficulty { case easy, hard }
+
 // MARK: - Models
 
 struct WordleGuess {
-    var letters: [String]
-    var states: [WordleTileState]
-
-    init() {
-        letters = Array(repeating: "", count: 5)
-        states  = Array(repeating: .empty, count: 5)
-    }
+    var letters: [String]        = Array(repeating: "", count: 5)
+    var states: [WordleTileState] = Array(repeating: .empty, count: 5)
+    var revealed: [Bool]         = Array(repeating: false, count: 5)
 }
 
 // MARK: - ViewModel
@@ -56,91 +68,122 @@ class WordleViewModel: ObservableObject {
     @Published var gameState: WordleGameState = .playing
     @Published var targetWord: String = ""
     @Published var letterKeyStates: [String: WordleTileState] = [:]
+    @Published var roundScores: [Int] = []
+    @Published var difficulty: WordleDifficulty = .easy
+    @Published var isRevealing: Bool = false
 
-    init() {
-        startNewGame()
+    init() { startNewGame() }
+
+    var movingAverage: Double {
+        guard !roundScores.isEmpty else { return 3.5 }
+        let slice = roundScores.suffix(5)
+        return Double(slice.reduce(0, +)) / Double(slice.count)
     }
 
     func startNewGame() {
-        guesses      = Array(repeating: WordleGuess(), count: 6)
-        currentRow   = 0
-        currentCol   = 0
-        gameState    = .playing
-        targetWord   = wordleWordList.randomElement() ?? "SWIFT"
+        let avg = movingAverage
+        if avg > 4.5 {
+            difficulty = .hard
+            targetWord = wordleHardWords.randomElement() ?? "STOIC"
+        } else if avg < 3.0 {
+            difficulty = .easy
+            targetWord = wordleEasyWords.randomElement() ?? "FOUND"
+        } else {
+            // blend: pick from combined list
+            let combined = wordleEasyWords + wordleHardWords
+            targetWord = combined.randomElement() ?? "CRANE"
+            difficulty = wordleHardWords.contains(targetWord) ? .hard : .easy
+        }
+
+        guesses         = Array(repeating: WordleGuess(), count: 6)
+        currentRow      = 0
+        currentCol      = 0
+        gameState       = .playing
         letterKeyStates = [:]
+        isRevealing     = false
     }
 
     func typeLetter(_ letter: String) {
-        guard gameState == .playing, currentCol < 5 else { return }
+        guard gameState == .playing, currentCol < 5, !isRevealing else { return }
         guesses[currentRow].letters[currentCol] = letter
         currentCol += 1
     }
 
     func deleteLetter() {
-        guard gameState == .playing, currentCol > 0 else { return }
+        guard gameState == .playing, currentCol > 0, !isRevealing else { return }
         currentCol -= 1
         guesses[currentRow].letters[currentCol] = ""
     }
 
     func submitGuess() {
-        guard gameState == .playing, currentCol == 5 else { return }
+        guard gameState == .playing, currentCol == 5, !isRevealing else { return }
 
-        let guess = guesses[currentRow].letters.joined()
+        let guess  = guesses[currentRow].letters.joined()
         let result = evaluate(guess: guess, target: targetWord)
         guesses[currentRow].states = result
 
-        // Update key states — correct > present > absent
-        for (i, letter) in guesses[currentRow].letters.enumerated() {
-            let newState = result[i]
-            if let existing = letterKeyStates[letter] {
-                if existing != .correct {
-                    if newState == .correct || (newState == .present && existing == .absent) {
-                        letterKeyStates[letter] = newState
-                    }
+        isRevealing = true
+
+        // Animate reveal col by col
+        for col in 0..<5 {
+            let delay = Double(col) * 0.18
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                    self.guesses[self.currentRow].revealed[col] = true
                 }
-            } else {
-                letterKeyStates[letter] = newState
             }
         }
 
-        if guess == targetWord {
-            gameState = .won
-        } else if currentRow == 5 {
-            gameState = .lost
-        } else {
-            currentRow += 1
-            currentCol = 0
+        // After all tiles revealed, update state
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5 * 0.18 + 0.3) {
+            // Update key states
+            for (i, letter) in self.guesses[self.currentRow].letters.enumerated() {
+                let newState = result[i]
+                if let existing = self.letterKeyStates[letter] {
+                    if existing != .correct {
+                        if newState == .correct || (newState == .present && existing == .absent) {
+                            self.letterKeyStates[letter] = newState
+                        }
+                    }
+                } else {
+                    self.letterKeyStates[letter] = newState
+                }
+            }
+
+            self.isRevealing = false
+
+            if guess == self.targetWord {
+                let score = 7 - self.currentRow  // currentRow is 0-indexed attempt number at time of win
+                self.roundScores.append(score)
+                self.gameState = .won
+            } else if self.currentRow == 5 {
+                self.roundScores.append(0)
+                self.gameState = .lost
+            } else {
+                self.currentRow += 1
+                self.currentCol  = 0
+            }
         }
     }
 
     private func evaluate(guess: String, target: String) -> [WordleTileState] {
-        var result = Array(repeating: WordleTileState.absent, count: 5)
+        var result      = Array(repeating: WordleTileState.absent, count: 5)
         var targetChars = Array(target)
         let guessChars  = Array(guess)
 
-        // Pass 1: correct positions
-        for i in 0..<5 {
-            if guessChars[i] == targetChars[i] {
-                result[i]      = .correct
-                targetChars[i] = "_"
-            }
+        for i in 0..<5 where guessChars[i] == targetChars[i] {
+            result[i]      = .correct
+            targetChars[i] = "_"
         }
-
-        // Pass 2: present elsewhere
         for i in 0..<5 {
             guard result[i] != .correct else { continue }
             if let idx = targetChars.firstIndex(of: guessChars[i]) {
-                result[i]      = .present
-                targetChars[idx] = "_"
+                result[i]         = .present
+                targetChars[idx]  = "_"
             }
         }
-
         return result
     }
-}
-
-enum WordleGameState {
-    case playing, won, lost
 }
 
 // MARK: - Main View
@@ -148,18 +191,36 @@ enum WordleGameState {
 struct WordleView: View {
     @StateObject private var vm = WordleViewModel()
 
+    private var backgroundGradient: LinearGradient {
+        LinearGradient(
+            colors: [Color(red: 0.07, green: 0.07, blue: 0.18), Color(red: 0.12, green: 0.06, blue: 0.24)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+            backgroundGradient.ignoresSafeArea()
 
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 // Header
-                Text("WORDLE")
-                    .font(.system(size: 28, weight: .heavy, design: .rounded))
-                    .tracking(4)
-                    .padding(.top, 8)
+                VStack(spacing: 4) {
+                    Text("WORDLE")
+                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .tracking(4)
 
-                Divider()
+                    HStack(spacing: 8) {
+                        WordleDifficultyBadge(difficulty: vm.difficulty)
+                        if !vm.roundScores.isEmpty {
+                            Text("Avg: \(String(format: "%.1f", vm.movingAverage))")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                    }
+                }
+                .padding(.top, 10)
 
                 // Grid
                 WordleGridView(vm: vm)
@@ -167,32 +228,61 @@ struct WordleView: View {
 
                 Spacer()
 
-                // Keyboard
-                WordleKeyboardView(vm: vm)
-                    .padding(.bottom, 12)
+                // Keyboard – glassmorphism background
+                ZStack {
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(.ultraThinMaterial)
+                        .ignoresSafeArea(edges: .bottom)
+
+                    WordleKeyboardView(vm: vm)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 8)
+                }
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             // Overlays
             if vm.gameState == .won {
                 WordleResultOverlay(
-                    title: "Brilliant!",
-                    subtitle: "You guessed the word!",
-                    symbolName: "star.fill",
+                    title: "Outstanding!",
+                    subtitle: "Word guessed correctly",
+                    symbolName: "trophy.fill",
                     symbolColor: .yellow,
                     targetWord: vm.targetWord,
+                    score: vm.roundScores.last ?? 0,
                     onRestart: { vm.startNewGame() }
                 )
             } else if vm.gameState == .lost {
                 WordleResultOverlay(
                     title: "Game Over",
-                    subtitle: "Better luck next time",
-                    symbolName: "xmark.circle.fill",
+                    subtitle: "The word slipped away",
+                    symbolName: "xmark.circle",
                     symbolColor: .red,
                     targetWord: vm.targetWord,
+                    score: 0,
                     onRestart: { vm.startNewGame() }
                 )
             }
         }
+    }
+}
+
+// MARK: - Difficulty Badge
+
+struct WordleDifficultyBadge: View {
+    let difficulty: WordleDifficulty
+
+    var body: some View {
+        Text(difficulty == .hard ? "Hard Mode" : "Easy Mode")
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                Capsule().fill(difficulty == .hard
+                    ? Color(red: 0.88, green: 0.20, blue: 0.20).opacity(0.8)
+                    : Color(red: 0.20, green: 0.72, blue: 0.48).opacity(0.8))
+            )
+            .foregroundColor(.white)
     }
 }
 
@@ -208,7 +298,9 @@ struct WordleGridView: View {
                     ForEach(0..<5, id: \.self) { col in
                         WordleTileView(
                             letter: vm.guesses[row].letters[col],
-                            state: vm.guesses[row].states[col]
+                            state: vm.guesses[row].states[col],
+                            revealed: vm.guesses[row].revealed[col],
+                            isCurrentRow: row == vm.currentRow && vm.guesses[row].revealed.allSatisfy({ !$0 })
                         )
                     }
                 }
@@ -220,18 +312,38 @@ struct WordleGridView: View {
 struct WordleTileView: View {
     let letter: String
     let state: WordleTileState
+    let revealed: Bool
+    let isCurrentRow: Bool
 
     var body: some View {
-        Text(letter)
-            .font(.system(size: 28, weight: .bold, design: .rounded))
-            .foregroundColor(state.foregroundColor)
-            .frame(width: 58, height: 58)
-            .background(state.backgroundColor)
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(state.borderColor, lineWidth: 2)
-            )
-            .cornerRadius(4)
+        ZStack {
+            if revealed || !isCurrentRow && state != .empty {
+                // Colored revealed tile
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(state.backgroundColor)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    )
+                Text(letter)
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+            } else {
+                // Frosted glass unconfirmed tile
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.white.opacity(letter.isEmpty ? 0.20 : 0.55), lineWidth: letter.isEmpty ? 1 : 2)
+                    )
+                Text(letter)
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+            }
+        }
+        .frame(width: 58, height: 58)
+        .scaleEffect(letter.isEmpty ? 1.0 : (isCurrentRow ? 1.05 : 1.0))
+        .animation(.spring(response: 0.2, dampingFraction: 0.6), value: letter)
     }
 }
 
@@ -262,7 +374,6 @@ struct WordleKeyboardView: View {
                 }
             }
         }
-        .padding(.horizontal, 8)
     }
 }
 
@@ -276,22 +387,26 @@ struct WordleKeyButton: View {
     var body: some View {
         Button(action: action) {
             Text(key == "DELETE" ? "⌫" : key)
-                .font(.system(size: isSpecial ? 13 : 17, weight: .semibold, design: .rounded))
-                .foregroundColor(state == .empty ? .primary : .white)
-                .frame(width: isSpecial ? 52 : 34, height: 50)
-                .background(keyBackground)
-                .cornerRadius(6)
+                .font(.system(size: isSpecial ? 12 : 16, weight: .semibold, design: .rounded))
+                .foregroundColor(.white)
+                .frame(width: isSpecial ? 50 : 33, height: 46)
+                .background(keyBg)
+                .cornerRadius(7)
         }
         .buttonStyle(PlainButtonStyle())
     }
 
     @ViewBuilder
-    private var keyBackground: some View {
+    private var keyBg: some View {
         switch state {
-        case .empty:   Color(.systemGray4)
-        case .correct: Color(red: 0.38, green: 0.65, blue: 0.40)
-        case .present: Color(red: 0.79, green: 0.69, blue: 0.29)
-        case .absent:  Color(red: 0.47, green: 0.49, blue: 0.51)
+        case .empty:
+            Color.white.opacity(0.18)
+        case .correct:
+            Color(red: 0.25, green: 0.72, blue: 0.48)
+        case .present:
+            Color(red: 0.88, green: 0.72, blue: 0.20)
+        case .absent:
+            Color.white.opacity(0.10)
         }
     }
 }
@@ -304,48 +419,56 @@ struct WordleResultOverlay: View {
     let symbolName: String
     let symbolColor: Color
     let targetWord: String
+    let score: Int
     let onRestart: () -> Void
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.5).ignoresSafeArea()
+            Color.black.opacity(0.60).ignoresSafeArea()
 
-            VStack(spacing: 20) {
+            VStack(spacing: 18) {
                 Image(systemName: symbolName)
-                    .font(.system(size: 52))
+                    .font(.system(size: 56))
                     .foregroundColor(symbolColor)
 
                 Text(title)
-                    .font(.system(size: 28, weight: .heavy, design: .rounded))
+                    .font(.system(size: 26, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
 
                 Text(subtitle)
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.white.opacity(0.7))
 
                 VStack(spacing: 4) {
                     Text("The word was")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.white.opacity(0.6))
                     Text(targetWord)
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
                         .tracking(4)
-                        .foregroundColor(Color(red: 0.38, green: 0.65, blue: 0.40))
+                        .foregroundColor(Color(red: 0.25, green: 0.72, blue: 0.48))
+                }
+
+                if score > 0 {
+                    Text("Score: +\(score)")
+                        .font(.headline)
+                        .foregroundColor(.yellow)
                 }
 
                 Button(action: onRestart) {
-                    Text("Play Again")
+                    Text("Next Round")
                         .font(.headline)
                         .foregroundColor(.white)
                         .frame(width: 160, height: 46)
-                        .background(Color(red: 0.38, green: 0.65, blue: 0.40))
+                        .background(Color(red: 0.25, green: 0.72, blue: 0.48))
                         .cornerRadius(12)
                 }
+                .padding(.top, 4)
             }
             .padding(32)
-            .background(Color(.systemBackground))
-            .cornerRadius(20)
-            .shadow(radius: 20)
-            .padding(.horizontal, 32)
+            .background(.ultraThinMaterial)
+            .cornerRadius(24)
+            .padding(.horizontal, 28)
         }
     }
 }

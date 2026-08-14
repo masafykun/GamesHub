@@ -3,11 +3,12 @@ import SwiftUI
 // MARK: - Models
 
 struct LightsOutGrid {
-    static let size = 5
+    let size: Int
     var cells: [[Bool]]
 
-    init() {
-        cells = Array(repeating: Array(repeating: false, count: LightsOutGrid.size), count: LightsOutGrid.size)
+    init(size: Int) {
+        self.size = size
+        cells = Array(repeating: Array(repeating: false, count: size), count: size)
     }
 
     var isAllOff: Bool {
@@ -15,45 +16,38 @@ struct LightsOutGrid {
     }
 
     mutating func toggle(row: Int, col: Int) {
-        let n = LightsOutGrid.size
-        let neighbors: [(Int, Int)] = [
-            (row, col),
-            (row - 1, col),
-            (row + 1, col),
-            (row, col - 1),
-            (row, col + 1)
+        let neighbours: [(Int, Int)] = [
+            (row, col), (row - 1, col), (row + 1, col), (row, col - 1), (row, col + 1)
         ]
-        for (r, c) in neighbors {
-            if r >= 0 && r < n && c >= 0 && c < n {
-                cells[r][c].toggle()
-            }
+        for (r, c) in neighbours where r >= 0 && r < size && c >= 0 && c < size {
+            cells[r][c].toggle()
         }
     }
 }
 
 // MARK: - Game State
 
-class LightsOutGameState: ObservableObject {
-    @Published var grid: LightsOutGrid = LightsOutGrid()
+final class LightsOutGameState: ObservableObject {
+    @Published var grid: LightsOutGrid
     @Published var moves: Int = 0
     @Published var isWon: Bool = false
 
-    init() {
+    private let size: Int
+
+    init(size: Int) {
+        self.size = size
+        self.grid = LightsOutGrid(size: size)
         newPuzzle()
     }
 
+    /// Built by toggling a fresh board, so every puzzle is guaranteed solvable.
     func newPuzzle() {
-        var g = LightsOutGrid()
-        // Generate a solvable puzzle by starting from all-off and applying random toggles
-        let n = LightsOutGrid.size
+        var g = LightsOutGrid(size: size)
         var attempts = 0
         repeat {
-            g = LightsOutGrid()
-            let numToggles = Int.random(in: 5...15)
-            for _ in 0..<numToggles {
-                let r = Int.random(in: 0..<n)
-                let c = Int.random(in: 0..<n)
-                g.toggle(row: r, col: c)
+            g = LightsOutGrid(size: size)
+            for _ in 0..<Int.random(in: (size + 1)...(size * 3)) {
+                g.toggle(row: Int.random(in: 0..<size), col: Int.random(in: 0..<size))
             }
             attempts += 1
         } while g.isAllOff && attempts < 100
@@ -67,184 +61,429 @@ class LightsOutGameState: ObservableObject {
         guard !isWon else { return }
         grid.toggle(row: row, col: col)
         moves += 1
-        if grid.isAllOff {
-            isWon = true
-        }
-    }
-
-    func restart() {
-        newPuzzle()
+        if grid.isAllOff { isWon = true }
     }
 }
 
-// MARK: - Cell View
 
-struct LightsOutCellView: View {
-    let isOn: Bool
-    let onTap: () -> Void
+// MARK: - Difficulty
 
-    var body: some View {
-        Button(action: onTap) {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(isOn ? Color.yellow : Color(UIColor.systemGray5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(isOn ? Color.orange : Color(UIColor.systemGray3), lineWidth: 2)
-                )
-                .shadow(
-                    color: isOn ? Color.yellow.opacity(0.7) : Color.clear,
-                    radius: isOn ? 8 : 0
-                )
-                .animation(.easeInOut(duration: 0.15), value: isOn)
+enum LightsOutDifficulty {
+    case easy    // 4x4
+    case medium  // 5x5
+    case hard    // 6x6
+
+    var gridSize: Int {
+        switch self {
+        case .easy:   return 4
+        case .medium: return 5
+        case .hard:   return 6
         }
-        .buttonStyle(PlainButtonStyle())
     }
-}
 
-// MARK: - Grid View
+    var label: String {
+        switch self {
+        case .easy:   return "Easy"
+        case .medium: return "Medium"
+        case .hard:   return "Hard"
+        }
+    }
 
-struct LightsOutGridView: View {
-    @ObservedObject var state: LightsOutGameState
-
-    var body: some View {
-        GeometryReader { geo in
-            let spacing: CGFloat = 8
-            let n = CGFloat(LightsOutGrid.size)
-            let totalSpacing = spacing * (n - 1)
-            let cellSize = (min(geo.size.width, geo.size.height) - totalSpacing) / n
-
-            VStack(spacing: spacing) {
-                ForEach(0..<LightsOutGrid.size, id: \.self) { row in
-                    HStack(spacing: spacing) {
-                        ForEach(0..<LightsOutGrid.size, id: \.self) { col in
-                            LightsOutCellView(
-                                isOn: state.grid.cells[row][col],
-                                onTap: { state.tap(row: row, col: col) }
-                            )
-                            .frame(width: cellSize, height: cellSize)
-                        }
-                    }
-                }
-            }
+    var badgeColor: Color {
+        switch self {
+        case .easy:   return .green
+        case .medium: return .orange
+        case .hard:   return .red
         }
     }
 }
 
-// MARK: - Win Overlay
-
-struct LightsOutWinOverlay: View {
-    let moves: Int
-    let onRestart: () -> Void
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.55)
-                .ignoresSafeArea()
-
-            VStack(spacing: 24) {
-                Text("All Lights Off!")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.yellow)
-
-                Text("Solved in \(moves) move\(moves == 1 ? "" : "s")")
-                    .font(.system(size: 20, weight: .medium, design: .rounded))
-                    .foregroundColor(.white)
-
-                Button(action: onRestart) {
-                    Text("New Puzzle")
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 32)
-                        .padding(.vertical, 14)
-                        .background(Color.yellow)
-                        .clipShape(Capsule())
-                        .shadow(color: Color.yellow.opacity(0.5), radius: 8)
-                }
-            }
-            .padding(40)
-            .background(
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color(UIColor.systemGray6).opacity(0.95))
-                    .shadow(color: .black.opacity(0.4), radius: 20)
-            )
-            .padding(32)
-        }
-    }
-}
+// MARK: - Game Logic
 
 // MARK: - Main View
 
 struct LightsOutView: View {
-    @StateObject private var state = LightsOutGameState()
+    @State private var difficulty: LightsOutDifficulty = .medium
+    @State private var game: LightsOutGameState = LightsOutGameState(size: LightsOutDifficulty.medium.gridSize)
+    @State private var roundScores: [Int] = []
+    @State private var elapsedTime: Int = 0
+    @State private var showWin: Bool = false
+    @State private var timer: Timer? = nil
+    @State private var tappedCell: (Int, Int)? = nil
+
+    // Score = moves * elapsed seconds (lower = better, for moving average)
+    private var currentScore: Int { game.moves * max(1, elapsedTime) }
+
+    // Moving average of last 5 scores
+    private var movingAverage: Double {
+        guard !roundScores.isEmpty else { return 0 }
+        return Double(roundScores.reduce(0, +)) / Double(roundScores.count)
+    }
 
     var body: some View {
         ZStack {
-            Color(UIColor.systemBackground)
-                .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                // Header
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Lights Out")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                            .foregroundColor(.primary)
-                        Text("Turn all lights off")
-                            .font(.system(size: 13, weight: .regular, design: .rounded))
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("\(state.moves)")
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
-                            .foregroundColor(state.moves == 0 ? .secondary : .primary)
-                            .animation(.none, value: state.moves)
-                        Text("moves")
-                            .font(.system(size: 12, weight: .regular, design: .rounded))
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 16)
-                .padding(.bottom, 20)
-
-                // Grid
-                LightsOutGridView(state: state)
-                    .padding(.horizontal, 24)
-                    .aspectRatio(1, contentMode: .fit)
-
+            backgroundGradient
+            VStack(spacing: 20) {
+                headerBar
+                difficultyBadge
+                statsRow
+                gridView
                 Spacer()
-
-                // Restart button
-                Button(action: { state.restart() }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("New Puzzle")
-                            .font(.system(size: 17, weight: .semibold, design: .rounded))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 36)
-                    .padding(.vertical, 14)
-                    .background(Color.accentColor)
-                    .clipShape(Capsule())
-                    .shadow(color: Color.accentColor.opacity(0.35), radius: 8, y: 4)
-                }
-                .padding(.bottom, 36)
+                restartButton
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
 
-            // Win overlay
-            if state.isWon {
-                LightsOutWinOverlay(moves: state.moves, onRestart: { state.restart() })
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: state.isWon)
+            if showWin {
+                winOverlay
             }
         }
+        .onAppear { startTimer() }
+        .onDisappear { stopTimer() }
+    }
+
+    // MARK: - Background
+
+    private var backgroundGradient: some View {
+        LinearGradient(
+            gradient: Gradient(colors: [
+                Color(red: 0.08, green: 0.08, blue: 0.18),
+                Color(red: 0.05, green: 0.05, blue: 0.12)
+            ]),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
+
+    // MARK: - Header
+
+    private var headerBar: some View {
+        Text("Lights Out")
+            .font(.system(size: 32, weight: .bold, design: .rounded))
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [Color.cyan, Color.purple],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .shadow(color: .cyan.opacity(0.4), radius: 8)
+    }
+
+    // MARK: - Difficulty Badge
+
+    private var difficultyBadge: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(difficulty.badgeColor)
+                .frame(width: 10, height: 10)
+                .shadow(color: difficulty.badgeColor.opacity(0.8), radius: 4)
+            Text(difficulty.label)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundColor(difficulty.badgeColor)
+            Text("• \(game.grid.size)×\(game.grid.size)")
+                .font(.system(size: 13, weight: .regular, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(
+            Capsule().stroke(difficulty.badgeColor.opacity(0.4), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Stats
+
+    private var statsRow: some View {
+        HStack(spacing: 16) {
+            statCard(icon: "hand.tap", label: "Moves", value: "\(game.moves)")
+            statCard(icon: "clock", label: "Time", value: timeString(elapsedTime))
+            if !roundScores.isEmpty {
+                statCard(icon: "chart.line.uptrend.xyaxis", label: "Avg Score", value: String(format: "%.0f", movingAverage))
+            }
+        }
+    }
+
+    private func statCard(icon: String, label: String, value: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(.cyan.opacity(0.8))
+            Text(value)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.white.opacity(0.5))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Grid
+
+    private var gridView: some View {
+        GeometryReader { geo in
+            let totalPadding: CGFloat = 24
+            let spacing: CGFloat = 8
+            let gridWidth = geo.size.width - totalPadding
+            let cellSize = (gridWidth - spacing * CGFloat(game.grid.size - 1)) / CGFloat(game.grid.size)
+
+            VStack(spacing: spacing) {
+                ForEach(0..<game.grid.size, id: \.self) { row in
+                    HStack(spacing: spacing) {
+                        ForEach(0..<game.grid.size, id: \.self) { col in
+                            cellView(row: row, col: col, size: cellSize)
+                        }
+                    }
+                }
+            }
+            .padding(totalPadding / 2)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+            )
+            .frame(width: geo.size.width, height: CGFloat(game.grid.size) * (cellSize + spacing) + spacing + totalPadding)
+        }
+        .frame(height: CGFloat(game.grid.size) * 62 + 48)
+    }
+
+    private func cellView(row: Int, col: Int, size: CGFloat) -> some View {
+        let isLit = game.grid.cells[row][col]
+        let isTapped = tappedCell.map { $0 == (row, col) } ?? false
+
+        return RoundedRectangle(cornerRadius: 10)
+            .fill(
+                isLit
+                ? LinearGradient(
+                    colors: [Color.yellow, Color.orange],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                : LinearGradient(
+                    colors: [Color(white: 0.15), Color(white: 0.1)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .frame(width: size, height: size)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(
+                        isLit ? Color.yellow.opacity(0.6) : Color.white.opacity(0.06),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(
+                color: isLit ? Color.yellow.opacity(0.6) : .clear,
+                radius: isTapped ? 12 : 6
+            )
+            .scaleEffect(isTapped ? 0.88 : 1.0)
+            .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isTapped)
+            .animation(.easeInOut(duration: 0.15), value: isLit)
+            .onTapGesture {
+                handleCellTap(row: row, col: col)
+            }
+    }
+
+    // MARK: - Tap Handler
+
+    private func handleCellTap(row: Int, col: Int) {
+        guard !showWin else { return }
+        tappedCell = (row, col)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            tappedCell = nil
+        }
+        game.tap(row: row, col: col)
+        if game.isWon {
+            stopTimer()
+            recordScore()
+            showWin = true
+        }
+    }
+
+    // MARK: - Score & Difficulty Adaptation
+
+    private func recordScore() {
+        let score = game.moves * max(1, elapsedTime)
+        roundScores.append(score)
+        if roundScores.count > 5 { roundScores.removeFirst() }
+        adaptDifficulty()
+    }
+
+    private func adaptDifficulty() {
+        guard roundScores.count >= 2 else { return }
+        let avg = movingAverage
+
+        // Thresholds tuned per grid size
+        // Easy (4x4): avg < 200 => bump up, avg > 600 => bump down
+        // Medium (5x5): avg < 400 => bump up, avg > 1200 => bump down
+        // Hard (6x6): top tier
+        switch difficulty {
+        case .easy:
+            if avg < 200 { difficulty = .medium }
+        case .medium:
+            if avg < 400 { difficulty = .hard }
+            else if avg > 1200 { difficulty = .easy }
+        case .hard:
+            if avg > 1800 { difficulty = .medium }
+        }
+    }
+
+    // MARK: - Restart
+
+    private var restartButton: some View {
+        Button(action: startNewGame) {
+            Label("New Puzzle", systemImage: "arrow.clockwise")
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
+                    LinearGradient(
+                        colors: [Color.purple.opacity(0.7), Color.cyan.opacity(0.7)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                )
+        }
+    }
+
+    private func startNewGame() {
+        showWin = false
+        game = LightsOutGameState(size: difficulty.gridSize)
+        elapsedTime = 0
+        startTimer()
+    }
+
+    // MARK: - Win Overlay
+
+    private var winOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.55)
+                .ignoresSafeArea()
+                .onTapGesture { } // absorb taps
+
+            VStack(spacing: 24) {
+                Text("You Win!")
+                    .font(.system(size: 40, weight: .heavy, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.yellow, .orange],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .shadow(color: .yellow.opacity(0.6), radius: 12)
+
+                VStack(spacing: 8) {
+                    winStat(label: "Moves", value: "\(game.moves)")
+                    winStat(label: "Time", value: timeString(elapsedTime))
+                    winStat(label: "Score", value: "\(currentScore)")
+                    if roundScores.count >= 2 {
+                        winStat(label: "Avg Score (last \(roundScores.count))", value: String(format: "%.0f", movingAverage))
+                    }
+                }
+
+                // Next difficulty hint
+                nextDifficultyHint
+
+                Button(action: startNewGame) {
+                    Text("Play Again")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.yellow)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .padding(.top, 4)
+            }
+            .padding(28)
+            .frame(maxWidth: 320)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24)
+                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.5), radius: 30)
+        }
+        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showWin)
+    }
+
+    private func winStat(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .foregroundColor(.white.opacity(0.6))
+                .font(.system(size: 15, design: .rounded))
+            Spacer()
+            Text(value)
+                .foregroundColor(.white)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+        }
+    }
+
+    @ViewBuilder
+    private var nextDifficultyHint: some View {
+        if roundScores.count >= 2 {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.right.circle.fill")
+                    .foregroundColor(difficulty.badgeColor)
+                Text("Next: \(difficulty.label) (\(difficulty.gridSize)×\(difficulty.gridSize))")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundColor(difficulty.badgeColor)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(difficulty.badgeColor.opacity(0.15), in: Capsule())
+        }
+    }
+
+    // MARK: - Timer
+
+    private func startTimer() {
+        stopTimer()
+        let t = Timer(timeInterval: 1.0, repeats: true) { _ in
+            elapsedTime += 1
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    // MARK: - Helpers
+
+    private func timeString(_ seconds: Int) -> String {
+        let m = seconds / 60
+        let s = seconds % 60
+        return String(format: "%d:%02d", m, s)
     }
 }
 
 // MARK: - Preview
 
-#Preview {
-    LightsOutView()
+struct LightsOutView_Previews: PreviewProvider {
+    static var previews: some View {
+        LightsOutView()
+            .preferredColorScheme(.dark)
+    }
 }

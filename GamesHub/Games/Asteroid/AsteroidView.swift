@@ -13,7 +13,43 @@ enum AsteroidGameState {
     case gameOver
 }
 
+
+// MARK: - Models
+
+enum AsteroidDifficulty: String {
+    case easy   = "Easy"
+    case medium = "Medium"
+    case hard   = "Hard"
+
+    var color: Color {
+        switch self {
+        case .easy:   return .green
+        case .medium: return .orange
+        case .hard:   return .red
+        }
+    }
+
+    var speedMultiplier: CGFloat {
+        switch self {
+        case .easy:   return 0.75
+        case .medium: return 1.0
+        case .hard:   return 1.4
+        }
+    }
+
+    var spawnMultiplier: Double {
+        switch self {
+        case .easy:   return 1.4
+        case .medium: return 1.0
+        case .hard:   return 0.65
+        }
+    }
+}
+
+// MARK: - Main View
+
 struct AsteroidView: View {
+    // Game state
     @State private var gameState: AsteroidGameState = .waiting
     @State private var shipPosition: CGPoint = .zero
     @State private var asteroids: [AsteroidRock] = []
@@ -23,22 +59,40 @@ struct AsteroidView: View {
     @State private var spawnAccumulator: Double = 0
     @State private var elapsedTime: Double = 0
 
+    // Adaptive difficulty
+    @State var roundScores: [Int] = []
+    @AppStorage("asteroidBestSeconds") private var bestSeconds: Int = 0
+    @State private var difficulty: AsteroidDifficulty = .medium
+
+    // Stars for background (stable across redraws)
+    @State private var stars: [AsteroidStarData] = []
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 // Space background
                 Color.black.ignoresSafeArea()
 
-                // Stars background
-                AsteroidStarsView(size: geo.size)
+                // Stars
+                AsteroidStarsCanvas(stars: stars, size: geo.size)
 
                 // Asteroids
                 ForEach(asteroids) { asteroid in
                     Circle()
-                        .fill(Color.gray.opacity(0.85))
+                        .fill(
+                            RadialGradient(
+                                gradient: Gradient(colors: [
+                                    Color.gray.opacity(0.9),
+                                    Color.gray.opacity(0.5)
+                                ]),
+                                center: .topLeading,
+                                startRadius: 0,
+                                endRadius: asteroid.radius * 2
+                            )
+                        )
                         .overlay(
                             Circle()
-                                .stroke(Color.gray.opacity(0.4), lineWidth: 2)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
                         )
                         .frame(width: asteroid.radius * 2, height: asteroid.radius * 2)
                         .position(asteroid.position)
@@ -47,80 +101,76 @@ struct AsteroidView: View {
                 // Player ship
                 if gameState == .playing || gameState == .waiting {
                     AsteroidShipShape()
-                        .fill(Color.cyan)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.cyan, Color.blue]),
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
                         .overlay(
                             AsteroidShipShape()
-                                .stroke(Color.white.opacity(0.8), lineWidth: 1.5)
+                                .stroke(Color.white.opacity(0.85), lineWidth: 1.5)
                         )
                         .frame(width: 36, height: 36)
                         .position(shipPosition)
-                        .shadow(color: .cyan.opacity(0.6), radius: 8)
+                        .shadow(color: .cyan.opacity(0.7), radius: 10)
                 }
 
-                // HUD
+                // HUD top bar
                 VStack {
-                    HStack {
+                    HStack(alignment: .center, spacing: 12) {
+                        // Difficulty badge
+                        Text(difficulty.rawValue)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundColor(difficulty.color)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(difficulty.color.opacity(0.5), lineWidth: 1)
+                            )
+
                         Spacer()
+
+                        // Score
                         Text("Time: \(Int(score))s")
-                            .font(.system(size: 18, weight: .bold, design: .monospaced))
+                            .font(.system(size: 17, weight: .bold, design: .monospaced))
                             .foregroundColor(.white)
-                            .padding(.trailing, 20)
-                            .padding(.top, 50)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 54)
+
                     Spacer()
                 }
 
                 // Waiting overlay
                 if gameState == .waiting {
-                    VStack(spacing: 20) {
-                        Text("ASTEROID DODGE")
-                            .font(.system(size: 32, weight: .black, design: .monospaced))
-                            .foregroundColor(.cyan)
-                            .shadow(color: .cyan, radius: 10)
-
-                        Text("Drag to move your ship")
-                            .font(.system(size: 16, weight: .medium, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.8))
-
-                        Text("Tap to Start")
-                            .font(.system(size: 20, weight: .bold, design: .monospaced))
-                            .foregroundColor(.yellow)
-                            .shadow(color: .yellow.opacity(0.8), radius: 8)
-                    }
-                    .onTapGesture {
-                        startGame(size: geo.size)
-                    }
+                    AsteroidWaitingOverlay(
+                        difficulty: difficulty,
+                        roundScores: roundScores
+                    )
                 }
 
                 // Game Over overlay
                 if gameState == .gameOver {
-                    ZStack {
-                        Color.black.opacity(0.6).ignoresSafeArea()
-
-                        VStack(spacing: 24) {
-                            Text("GAME OVER")
-                                .font(.system(size: 36, weight: .black, design: .monospaced))
-                                .foregroundColor(.red)
-                                .shadow(color: .red, radius: 12)
-
-                            Text("Survived: \(Int(score))s")
-                                .font(.system(size: 22, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white)
-
-                            Text("Tap to Play Again")
-                                .font(.system(size: 18, weight: .medium, design: .monospaced))
-                                .foregroundColor(.yellow)
-                                .shadow(color: .yellow.opacity(0.8), radius: 8)
-                        }
-                    }
-                    .onTapGesture {
-                        startGame(size: geo.size)
-                    }
+                    AsteroidGameOverOverlay(
+                        score: Int(score),
+                        roundScores: roundScores,
+                        difficulty: difficulty
+                    )
                 }
             }
             .onAppear {
                 screenSize = geo.size
                 shipPosition = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+                stars = AsteroidStarData.generate(in: geo.size, count: 90)
             }
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -131,10 +181,16 @@ struct AsteroidView: View {
                         if gameState == .playing {
                             shipPosition = value.location
                         }
+                        if gameState == .gameOver {
+                            startGame(size: geo.size)
+                        }
                     }
             )
         }
+        .preferredColorScheme(.dark)
     }
+
+    // MARK: - Game Logic
 
     private func startGame(size: CGSize) {
         asteroids = []
@@ -165,18 +221,19 @@ struct AsteroidView: View {
             asteroids[i].position.y += asteroids[i].velocity.dy
         }
 
-        // Remove off-screen asteroids (with margin)
-        let margin: CGFloat = 150
-        asteroids.removeAll { asteroid in
-            asteroid.position.x < -margin ||
-            asteroid.position.x > size.width + margin ||
-            asteroid.position.y < -margin ||
-            asteroid.position.y > size.height + margin
+        // Remove off-screen asteroids
+        let margin: CGFloat = 160
+        asteroids.removeAll {
+            $0.position.x < -margin ||
+            $0.position.x > size.width + margin ||
+            $0.position.y < -margin ||
+            $0.position.y > size.height + margin
         }
 
-        // Spawn asteroids
+        // Spawn asteroids — base interval shrinks over time, scaled by difficulty
         spawnAccumulator += dt
-        let spawnInterval = max(0.4, 1.5 - elapsedTime * 0.02)
+        let baseInterval = max(0.35, 1.5 - elapsedTime * 0.02)
+        let spawnInterval = baseInterval * difficulty.spawnMultiplier
         if spawnAccumulator >= spawnInterval {
             spawnAccumulator = 0
             let extraCount = Int(elapsedTime / 15)
@@ -205,17 +262,16 @@ struct AsteroidView: View {
         let padding: CGFloat = 30
 
         switch edge {
-        case 0: // top
+        case 0:
             startPos = CGPoint(x: CGFloat.random(in: 0...size.width), y: -padding)
-        case 1: // bottom
+        case 1:
             startPos = CGPoint(x: CGFloat.random(in: 0...size.width), y: size.height + padding)
-        case 2: // left
+        case 2:
             startPos = CGPoint(x: -padding, y: CGFloat.random(in: 0...size.height))
-        default: // right
+        default:
             startPos = CGPoint(x: size.width + padding, y: CGFloat.random(in: 0...size.height))
         }
 
-        // Aim toward a random point near center
         let centerVariance: CGFloat = min(size.width, size.height) * 0.3
         let target = CGPoint(
             x: size.width / 2 + CGFloat.random(in: -centerVariance...centerVariance),
@@ -225,62 +281,223 @@ struct AsteroidView: View {
         let dx = target.x - startPos.x
         let dy = target.y - startPos.y
         let length = sqrt(dx * dx + dy * dy)
-        let speed = CGFloat.random(in: 1.5...3.5)
+
+        // Base speed scaled by difficulty and time-based progression
+        let baseSpeed = CGFloat.random(in: 1.5...3.5)
+        let timeBonus = CGFloat(min(elapsedTime * 0.015, 1.5))
+        let speed = (baseSpeed + timeBonus) * difficulty.speedMultiplier
+
         let velocity = CGVector(dx: dx / length * speed, dy: dy / length * speed)
         let radius = CGFloat.random(in: 12...32)
 
-        let asteroid = AsteroidRock(position: startPos, velocity: velocity, radius: radius)
-        asteroids.append(asteroid)
+        asteroids.append(AsteroidRock(position: startPos, velocity: velocity, radius: radius))
     }
 
     private func endGame() {
         gameState = .gameOver
         timer?.invalidate()
         timer = nil
+
+        bestSeconds = max(bestSeconds, Int(score))
+
+        // Append score and keep last 5
+        roundScores.append(Int(score))
+        if roundScores.count > 5 {
+            roundScores = Array(roundScores.suffix(5))
+        }
+
+        // Compute moving average and adjust difficulty
+        let avg = Double(roundScores.reduce(0, +)) / Double(roundScores.count)
+        if avg < 10 {
+            difficulty = .easy
+        } else if avg < 25 {
+            difficulty = .medium
+        } else {
+            difficulty = .hard
+        }
     }
 }
 
-struct AsteroidShipShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let w = rect.width
-        let h = rect.height
-        // Triangle pointing up
-        path.move(to: CGPoint(x: w / 2, y: 0))
-        path.addLine(to: CGPoint(x: w, y: h))
-        path.addLine(to: CGPoint(x: 0, y: h))
-        path.closeSubpath()
-        return path
+// MARK: - Supporting Views
+
+struct AsteroidWaitingOverlay: View {
+    let difficulty: AsteroidDifficulty
+    let roundScores: [Int]
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .frame(maxWidth: 320)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                )
+
+            VStack(spacing: 18) {
+                Text("ASTEROID DODGE")
+                    .font(.system(size: 28, weight: .black, design: .monospaced))
+                    .foregroundColor(.cyan)
+                    .shadow(color: .cyan.opacity(0.8), radius: 10)
+
+                Text(" · Adaptive Difficulty")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+
+                Divider().background(Color.white.opacity(0.2))
+
+                HStack(spacing: 8) {
+                    Text("Mode:")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white.opacity(0.7))
+                    Text(difficulty.rawValue)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(difficulty.color)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 3)
+                        .background(difficulty.color.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+
+                if !roundScores.isEmpty {
+                    VStack(spacing: 6) {
+                        Text("Last Rounds")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.5))
+                        HStack(spacing: 6) {
+                            ForEach(Array(roundScores.enumerated()), id: \.offset) { _, s in
+                                Text("\(s)s")
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.8))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.white.opacity(0.08))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                }
+
+                Text("Drag to Begin")
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .foregroundColor(.yellow)
+                    .shadow(color: .yellow.opacity(0.7), radius: 8)
+            }
+            .padding(28)
+        }
+        .padding(.horizontal, 30)
     }
 }
 
-struct AsteroidStarsView: View {
-    let size: CGSize
+struct AsteroidGameOverOverlay: View {
+    let score: Int
+    let roundScores: [Int]
+    let difficulty: AsteroidDifficulty
 
-    private struct AsteroidStar: Identifiable {
-        let id: Int
-        let x: CGFloat
-        let y: CGFloat
-        let radius: CGFloat
-        let opacity: Double
+    private var movingAverage: Double {
+        guard !roundScores.isEmpty else { return 0 }
+        return Double(roundScores.reduce(0, +)) / Double(roundScores.count)
     }
 
-    private let stars: [AsteroidStar]
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
 
-    init(size: CGSize) {
-        self.size = size
-        var generated: [AsteroidStar] = []
-        for i in 0..<80 {
-            generated.append(AsteroidStar(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(.regularMaterial)
+                .frame(maxWidth: 320)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                )
+
+            VStack(spacing: 20) {
+                Text("GAME OVER")
+                    .font(.system(size: 34, weight: .black, design: .monospaced))
+                    .foregroundColor(.red)
+                    .shadow(color: .red.opacity(0.8), radius: 12)
+
+                VStack(spacing: 8) {
+                    Text("Survived: \(score)s")
+                        .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+
+                    if roundScores.count > 1 {
+                        Text("Avg (last \(roundScores.count)): \(String(format: "%.1f", movingAverage))s")
+                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                }
+
+                Divider().background(Color.white.opacity(0.2))
+
+                // Next difficulty preview
+                VStack(spacing: 6) {
+                    Text("Next Difficulty")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.5))
+                    Text(difficulty.rawValue)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(difficulty.color)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 5)
+                        .background(difficulty.color.opacity(0.15))
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(difficulty.color.opacity(0.4), lineWidth: 1)
+                        )
+                }
+
+                if !roundScores.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(Array(roundScores.enumerated()), id: \.offset) { _, s in
+                            Text("\(s)s")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.7))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Color.white.opacity(0.08))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+
+                Text("Drag to Play Again")
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .foregroundColor(.yellow)
+                    .shadow(color: .yellow.opacity(0.7), radius: 6)
+            }
+            .padding(28)
+        }
+    }
+}
+
+// MARK: - Shapes & Background
+
+struct AsteroidStarData: Identifiable {
+    let id: Int
+    let x: CGFloat
+    let y: CGFloat
+    let radius: CGFloat
+    let opacity: Double
+
+    static func generate(in size: CGSize, count: Int) -> [AsteroidStarData] {
+        (0..<count).map { i in
+            AsteroidStarData(
                 id: i,
                 x: CGFloat.random(in: 0...max(size.width, 1)),
                 y: CGFloat.random(in: 0...max(size.height, 1)),
-                radius: CGFloat.random(in: 0.5...2.0),
+                radius: CGFloat.random(in: 0.5...2.2),
                 opacity: Double.random(in: 0.3...1.0)
-            ))
+            )
         }
-        stars = generated
     }
+}
+
+struct AsteroidStarsCanvas: View {
+    let stars: [AsteroidStarData]
+    let size: CGSize
 
     var body: some View {
         Canvas { context, _ in
@@ -296,5 +513,20 @@ struct AsteroidStarsView: View {
             }
         }
         .ignoresSafeArea()
+    }
+}
+
+// MARK: - Ship Shape
+
+struct AsteroidShipShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let w = rect.width
+        let h = rect.height
+        path.move(to: CGPoint(x: w / 2, y: 0))
+        path.addLine(to: CGPoint(x: w, y: h))
+        path.addLine(to: CGPoint(x: 0, y: h))
+        path.closeSubpath()
+        return path
     }
 }

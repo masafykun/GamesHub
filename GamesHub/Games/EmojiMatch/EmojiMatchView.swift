@@ -2,41 +2,46 @@ import SwiftUI
 
 // MARK: - Models
 
-enum EmMtGamePhase {
+enum EmojiMatchPhase {
     case start, playing, won
 }
 
-struct EmMtCard: Identifiable {
+struct EmojiMatchCard: Identifiable {
     let id: Int
     let emoji: String
     var isFaceUp: Bool = false
     var isMatched: Bool = false
 }
 
-// MARK: - Main View
+// MARK: -  View (Glassmorphism + Adaptive Difficulty)
 
 struct EmojiMatchView: View {
-    @State private var phase: EmMtGamePhase = .start
-    @State private var cards: [EmMtCard] = []
+    @State private var phase: EmojiMatchPhase = .start
+    @State private var cards: [EmojiMatchCard] = []
     @State private var firstFlippedIndex: Int? = nil
     @State private var isProcessing: Bool = false
     @State private var moves: Int = 0
     @State private var score: Int = 0
     @State private var elapsedTime: Double = 0
-    @State private var timer: Timer? = nil
+    @State private var gameTimer: Timer? = nil
 
-    let emojis = ["🐶", "🐱", "🦊", "🐸", "🐼", "🦁", "🐨", "🦄"]
+    // Adaptive difficulty
+    @State private var recentResults: [Bool] = []
+    @State private var flipBackDelay: Double = 1.0
+    @State private var difficultyLabel: String = "Normal"
+
+    let baseEmojis = ["🐶", "🐱", "🦊", "🐸", "🐼", "🦁", "🐨", "🦄"]
+
+    var gradientColors: [Color] { [Color(red: 0.4, green: 0.2, blue: 0.8), Color(red: 0.1, green: 0.5, blue: 0.9)] }
 
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+            LinearGradient(colors: gradientColors, startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
             switch phase {
-            case .start:
-                startScreen
-            case .playing:
-                gameScreen
-            case .won:
-                wonScreen
+            case .start: startScreen
+            case .playing: gameScreen
+            case .won: wonScreen
             }
         }
     }
@@ -44,35 +49,33 @@ struct EmojiMatchView: View {
     // MARK: - Screens
 
     var startScreen: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 28) {
             Text("Emoji Match")
-                .font(.largeTitle).bold()
-            Text("Find all 8 matching pairs!")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Button(action: startGame) {
-                Text("Start Game")
-                    .font(.headline)
-                    .padding(.horizontal, 40).padding(.vertical, 14)
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-            }
+                .font(.largeTitle).bold().foregroundStyle(.white)
+            Text("Flip & match all 8 pairs!")
+                .font(.subheadline).foregroundStyle(.white.opacity(0.8))
+            glassButton("Start Game", action: startGame)
         }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding()
     }
 
     var gameScreen: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             HStack {
-                Label("\(moves)", systemImage: "hand.tap")
+                glassLabel("\(moves)", icon: "hand.tap")
                 Spacer()
-                Label(timeString, systemImage: "clock")
+                glassLabel(timeString, icon: "clock")
                 Spacer()
-                Label("\(score)", systemImage: "star.fill")
-                    .foregroundStyle(.yellow)
+                glassLabel("\(score)", icon: "star.fill")
             }
-            .font(.headline)
             .padding(.horizontal)
+
+            Text("Difficulty: \(difficultyLabel)")
+                .font(.caption).foregroundStyle(.white.opacity(0.7))
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
                 ForEach(cards.indices, id: \.self) { i in
@@ -86,19 +89,21 @@ struct EmojiMatchView: View {
 
     var wonScreen: some View {
         VStack(spacing: 20) {
-            Text("You Won!").font(.largeTitle).bold()
-            Text("Moves: \(moves)").font(.title2)
-            Text("Time: \(timeString)").font(.title2)
-            Text("Score: \(score)").font(.title2).foregroundStyle(.yellow)
-            Button(action: startGame) {
-                Text("Play Again")
-                    .font(.headline)
-                    .padding(.horizontal, 40).padding(.vertical, 14)
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            Text("You Won!").font(.largeTitle).bold().foregroundStyle(.white)
+            VStack(spacing: 8) {
+                Text("Moves: \(moves)").foregroundStyle(.white)
+                Text("Time: \(timeString)").foregroundStyle(.white)
+                Text("Score: \(score)").foregroundStyle(.yellow)
+                Text("Difficulty: \(difficultyLabel)").foregroundStyle(.white.opacity(0.8))
             }
+            .font(.title3)
+            glassButton("Play Again", action: startGame)
         }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding()
     }
 
     // MARK: - Card View
@@ -106,18 +111,50 @@ struct EmojiMatchView: View {
     func cardView(for index: Int) -> some View {
         let card = cards[index]
         return ZStack {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(card.isMatched ? Color.green.opacity(0.3) : (card.isFaceUp ? Color.blue.opacity(0.15) : Color.blue))
-            if card.isFaceUp || card.isMatched {
-                Text(card.emoji).font(.system(size: 32))
+            if card.isMatched {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.green.opacity(0.35))
+            } else if card.isFaceUp {
+                Color.clear
             } else {
-                Image(systemName: "questionmark")
-                    .font(.title).foregroundStyle(.white)
+                Color.clear
+            }
+            if card.isFaceUp || card.isMatched {
+                Text(card.emoji).font(.system(size: 30))
+            } else {
+                Image(systemName: "suit.spade.fill")
+                    .font(.title2).foregroundStyle(.white.opacity(0.6))
             }
         }
+        .frame(maxWidth: .infinity)
         .aspectRatio(1, contentMode: .fit)
-        .scaleEffect(card.isMatched ? 0.95 : 1.0)
-        .animation(.spring(response: 0.3), value: card.isFaceUp)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.3), lineWidth: 1))
+        .animation(.spring(response: 0.35), value: card.isFaceUp)
+    }
+
+    // MARK: - Helper Views
+
+    func glassLabel(_ text: String, icon: String) -> some View {
+        Label(text, systemImage: icon)
+            .font(.subheadline).bold()
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.3), lineWidth: 1))
+    }
+
+    func glassButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.headline).foregroundStyle(.white)
+                .padding(.horizontal, 40).padding(.vertical, 14)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.4), lineWidth: 1))
+        }
     }
 
     // MARK: - Logic
@@ -129,17 +166,31 @@ struct EmojiMatchView: View {
     }
 
     func startGame() {
-        let pairs = emojis.flatMap { [$0, $0] }.shuffled()
-        cards = pairs.enumerated().map { EmMtCard(id: $0.offset, emoji: $0.element) }
+        let pairs = baseEmojis.flatMap { [$0, $0] }.shuffled()
+        cards = pairs.enumerated().map { EmojiMatchCard(id: $0.offset, emoji: $0.element) }
         firstFlippedIndex = nil
         isProcessing = false
         moves = 0
         score = 0
         elapsedTime = 0
+        flipBackDelay = 1.0
+        difficultyLabel = "Normal"
         phase = .playing
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+        gameTimer?.invalidate()
+        gameTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             elapsedTime += 1
+        }
+    }
+
+    func updateDifficulty(matched: Bool) {
+        recentResults.append(matched)
+        if recentResults.count > 5 { recentResults.removeFirst() }
+        if recentResults.count == 5 {
+            let trueCount = recentResults.filter { $0 }.count
+            if trueCount > 4 {
+                flipBackDelay = max(0.4, flipBackDelay * 0.8)
+                difficultyLabel = flipBackDelay < 0.7 ? "Hard" : "Medium"
+            }
         }
     }
 
@@ -157,15 +208,17 @@ struct EmojiMatchView: View {
                 cards[first].isMatched = true
                 cards[index].isMatched = true
                 score += 10
+                updateDifficulty(matched: true)
                 firstFlippedIndex = nil
                 isProcessing = false
                 if cards.allSatisfy({ $0.isMatched }) {
-                    timer?.invalidate()
+                    gameTimer?.invalidate()
                     phase = .won
                 }
             } else {
                 let second = index
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                updateDifficulty(matched: false)
+                DispatchQueue.main.asyncAfter(deadline: .now() + flipBackDelay) {
                     cards[first].isFaceUp = false
                     cards[second].isFaceUp = false
                     firstFlippedIndex = nil

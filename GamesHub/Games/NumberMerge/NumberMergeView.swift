@@ -1,24 +1,19 @@
 import SwiftUI
 
 // MARK: - Models
-enum NMrgGamePhase { case start, playing, gameOver }
+enum NumberMergeGamePhase { case start, playing, gameOver }
 
-struct NMrgCell: Identifiable {
-    let id = UUID()
-    var value: Int
-}
-
-// MARK: - Game Logic
-struct NMrgBoard {
+struct NumberMergeBoard {
     var cells: [[Int]] = Array(repeating: Array(repeating: 0, count: 5), count: 5)
     var score: Int = 0
 
-    mutating func addRandom() {
+    mutating func addRandom(extraFours: Bool = false) {
         var empty: [(Int,Int)] = []
         for r in 0..<5 { for c in 0..<5 { if cells[r][c] == 0 { empty.append((r,c)) } } }
         guard !empty.isEmpty else { return }
         let pick = empty[Int.random(in: 0..<empty.count)]
-        cells[pick.0][pick.1] = Int.random(in: 0...3) == 0 ? 4 : 2
+        let threshold = extraFours ? 1 : 3
+        cells[pick.0][pick.1] = Int.random(in: 0...threshold) == 0 ? 4 : 2
     }
 
     mutating func slideLeft() -> Bool {
@@ -29,14 +24,8 @@ struct NMrgBoard {
             var i = 0
             while i < row.count {
                 if i + 1 < row.count && row[i] == row[i+1] {
-                    let v = row[i] * 2
-                    merged.append(v)
-                    score += v
-                    i += 2
-                } else {
-                    merged.append(row[i])
-                    i += 1
-                }
+                    let v = row[i] * 2; merged.append(v); score += v; i += 2
+                } else { merged.append(row[i]); i += 1 }
             }
             while merged.count < 5 { merged.append(0) }
             if merged != cells[r] { moved = true }
@@ -51,62 +40,57 @@ struct NMrgBoard {
         cells = rotated
     }
 
-    mutating func rotate270() { rotate90(); rotate90(); rotate90() }
-
-    mutating func swipe(_ dir: NMrgDirection) -> Bool {
+    mutating func swipe(_ dir: NumberMergeDirection) -> Bool {
         switch dir {
         case .left: return slideLeft()
         case .right: rotate90(); rotate90(); let m = slideLeft(); rotate90(); rotate90(); return m
-        case .up: rotate270(); let m = slideLeft(); rotate90(); return m
-        case .down: rotate90(); let m = slideLeft(); rotate270(); return m
+        case .up: rotate90(); rotate90(); rotate90(); let m = slideLeft(); rotate90(); return m
+        case .down: rotate90(); let m = slideLeft(); rotate90(); rotate90(); rotate90(); return m
         }
-    }
-
-    var isFull: Bool {
-        cells.flatMap { $0 }.allSatisfy { $0 != 0 }
     }
 
     var hasValidMoves: Bool {
-        if !isFull { return true }
-        for r in 0..<5 {
-            for c in 0..<5 {
-                let v = cells[r][c]
-                if r+1 < 5 && cells[r+1][c] == v { return true }
-                if c+1 < 5 && cells[r][c+1] == v { return true }
-            }
-        }
+        for r in 0..<5 { for c in 0..<5 {
+            if cells[r][c] == 0 { return true }
+            let v = cells[r][c]
+            if r+1 < 5 && cells[r+1][c] == v { return true }
+            if c+1 < 5 && cells[r][c+1] == v { return true }
+        }}
         return false
     }
 }
 
-enum NMrgDirection { case left, right, up, down }
+enum NumberMergeDirection { case left, right, up, down }
 
-// MARK: - Tile Color
 func nmrgTileColor(_ value: Int) -> Color {
     switch value {
-    case 2: return Color(red: 0.93, green: 0.89, blue: 0.85)
-    case 4: return Color(red: 0.93, green: 0.87, blue: 0.78)
-    case 8: return Color(red: 0.95, green: 0.69, blue: 0.47)
-    case 16: return Color(red: 0.96, green: 0.58, blue: 0.39)
-    case 32: return Color(red: 0.96, green: 0.49, blue: 0.37)
-    case 64: return Color(red: 0.96, green: 0.37, blue: 0.23)
-    case 128: return Color(red: 0.93, green: 0.81, blue: 0.45)
-    case 256: return Color(red: 0.93, green: 0.80, blue: 0.38)
-    case 512: return Color(red: 0.93, green: 0.78, blue: 0.31)
-    default: return value > 512 ? Color(red: 0.93, green: 0.75, blue: 0.20) : Color(red: 0.80, green: 0.77, blue: 0.73)
+    case 2: return .white.opacity(0.5)
+    case 4: return Color.yellow.opacity(0.3)
+    case 8: return Color.orange.opacity(0.4)
+    case 16: return Color.orange.opacity(0.6)
+    case 32: return Color.red.opacity(0.4)
+    case 64: return Color.red.opacity(0.6)
+    case 128: return Color.purple.opacity(0.4)
+    case 256: return Color.purple.opacity(0.6)
+    case 512: return Color.blue.opacity(0.5)
+    default: return value > 512 ? Color.cyan.opacity(0.5) : Color.white.opacity(0.2)
     }
 }
 
 // MARK: - Main View
 struct NumberMergeView: View {
-    @State private var board = NMrgBoard()
-    @State private var phase: NMrgGamePhase = .start
+    @State private var board = NumberMergeBoard()
+    @State private var phase: NumberMergeGamePhase = .start
     @State private var reached512 = false
-    @State private var dragStart: CGPoint = .zero
+    @State private var recentResults: [Bool] = []
+    @State private var difficulty: Double = 1.0
+
+    var spawnExtraFours: Bool { difficulty > 1.3 }
 
     var body: some View {
         ZStack {
-            Color(red: 0.97, green: 0.96, blue: 0.94).ignoresSafeArea()
+            LinearGradient(colors: [Color(red: 0.20, green: 0.10, blue: 0.40), Color(red: 0.05, green: 0.30, blue: 0.50)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
             switch phase {
             case .start: startScreen
             case .playing: gameScreen
@@ -116,80 +100,113 @@ struct NumberMergeView: View {
     }
 
     var startScreen: some View {
-        VStack(spacing: 24) {
-            Text("Number Merge").font(.largeTitle).bold().foregroundColor(Color(red: 0.46, green: 0.43, blue: 0.40))
-            Text("Swipe to slide tiles.\nMatch numbers to merge them.\nReach 512 to win!").multilineTextAlignment(.center).foregroundColor(.secondary)
-            Button(action: startGame) {
-                Text("Start Game").bold().padding(.horizontal, 40).padding(.vertical, 14)
-                    .background(Color(red: 0.96, green: 0.58, blue: 0.39)).foregroundColor(.white).clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-        }.padding()
+        VStack(spacing: 28) {
+            Text("Number Merge").font(.largeTitle).bold().foregroundColor(.white)
+            Text("Swipe to merge equal tiles\nReach 512 to win!").multilineTextAlignment(.center).foregroundColor(.white.opacity(0.8))
+            difficultyBadge
+            startButton("Start Game", action: startGame)
+        }.padding(24)
+        .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding()
+    }
+
+    var difficultyBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "speedometer").foregroundColor(.yellow)
+            Text("Difficulty: \(String(format: "%.1f", difficulty))x").foregroundColor(.white.opacity(0.9)).font(.caption)
+        }.padding(.horizontal, 12).padding(.vertical, 6)
+        .background(.ultraThinMaterial).clipShape(Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
     }
 
     var gameScreen: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             HStack {
-                Text("Score").font(.caption).foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("SCORE").font(.caption2).foregroundColor(.white.opacity(0.6))
+                    Text("\(board.score)").font(.title).bold().foregroundColor(.white)
+                }
                 Spacer()
-                Text("\(board.score)").font(.title2).bold().foregroundColor(Color(red: 0.46, green: 0.43, blue: 0.40))
+                difficultyBadge
             }.padding(.horizontal)
-            gridView
+
+            glassGrid
                 .gesture(DragGesture(minimumDistance: 20).onEnded { handleSwipe($0) })
-            Text("Swipe to move tiles").font(.caption2).foregroundColor(.secondary)
+
+            Text("Swipe to move tiles").font(.caption2).foregroundColor(.white.opacity(0.5))
         }.padding()
     }
 
-    var gridView: some View {
-        VStack(spacing: 6) {
+    var glassGrid: some View {
+        VStack(spacing: 5) {
             ForEach(0..<5, id: \.self) { r in
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     ForEach(0..<5, id: \.self) { c in
                         let val = board.cells[r][c]
                         ZStack {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(val == 0 ? Color(red: 0.81, green: 0.77, blue: 0.73) : nmrgTileColor(val))
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(val == 0 ? Color.white.opacity(0.05) : nmrgTileColor(val))
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(val == 0 ? 0.1 : 0.4), lineWidth: 1))
                             if val != 0 {
                                 Text("\(val)").font(val >= 1000 ? .caption : val >= 100 ? .callout : .title3)
-                                    .bold().foregroundColor(val <= 4 ? Color(red: 0.46, green: 0.43, blue: 0.40) : .white)
+                                    .bold().foregroundColor(.white)
                             }
-                        }.frame(width: 60, height: 60)
+                        }.frame(width: 58, height: 58)
                     }
                 }
             }
-        }.padding(8).background(Color(red: 0.72, green: 0.67, blue: 0.63)).clipShape(RoundedRectangle(cornerRadius: 12))
+        }.padding(8)
+        .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
     }
 
     var gameOverScreen: some View {
         VStack(spacing: 20) {
-            Text(reached512 ? "You Win!" : "Game Over").font(.largeTitle).bold()
-                .foregroundColor(reached512 ? Color(red: 0.93, green: 0.78, blue: 0.31) : Color(red: 0.46, green: 0.43, blue: 0.40))
-            Text("Score: \(board.score)").font(.title2).foregroundColor(.secondary)
-            if reached512 { Text("You reached 512!").foregroundColor(.orange) }
-            Button(action: startGame) {
-                Text("Play Again").bold().padding(.horizontal, 40).padding(.vertical, 14)
-                    .background(Color(red: 0.96, green: 0.58, blue: 0.39)).foregroundColor(.white).clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-        }.padding()
+            Text(reached512 ? "You Win!" : "Game Over").font(.largeTitle).bold().foregroundColor(reached512 ? .yellow : .white)
+            Text("Score: \(board.score)").font(.title2).foregroundColor(.white.opacity(0.8))
+            if reached512 { Text("512 reached!").foregroundColor(.yellow) }
+            Text("Wins in last \(recentResults.count) games: \(recentResults.filter { $0 }.count)").font(.caption).foregroundColor(.white.opacity(0.6))
+            startButton("Play Again", action: startGame)
+        }.padding(28)
+        .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding()
+    }
+
+    func startButton(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).bold().padding(.horizontal, 40).padding(.vertical, 14).foregroundColor(.white)
+                .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.5), lineWidth: 1))
+        }
     }
 
     func startGame() {
-        board = NMrgBoard()
-        board.addRandom()
-        board.addRandom()
+        board = NumberMergeBoard()
+        board.addRandom(extraFours: spawnExtraFours)
+        board.addRandom(extraFours: spawnExtraFours)
         reached512 = false
         phase = .playing
     }
 
     func handleSwipe(_ value: DragGesture.Value) {
-        let dx = value.translation.width
-        let dy = value.translation.height
-        let dir: NMrgDirection = abs(dx) > abs(dy) ? (dx > 0 ? .right : .left) : (dy > 0 ? .down : .up)
+        let dx = value.translation.width, dy = value.translation.height
+        let dir: NumberMergeDirection = abs(dx) > abs(dy) ? (dx > 0 ? .right : .left) : (dy > 0 ? .down : .up)
         let moved = board.swipe(dir)
         if moved {
-            board.addRandom()
+            board.addRandom(extraFours: spawnExtraFours)
             if board.cells.flatMap({ $0 }).contains(512) { reached512 = true }
-            if !board.hasValidMoves { phase = .gameOver }
-            if reached512 { phase = .gameOver }
+            let isOver = !board.hasValidMoves || reached512
+            if isOver {
+                recentResults.append(reached512)
+                if recentResults.count > 10 { recentResults.removeFirst() }
+                let last5 = Array(recentResults.suffix(5))
+                if last5.count == 5 && last5.filter({ $0 }).count > 4 {
+                    difficulty = min(difficulty * 1.2, 3.0)
+                }
+                phase = .gameOver
+            }
         }
     }
 }

@@ -1,11 +1,6 @@
 import SwiftUI
 
-// MARK: - Models
-
-struct AnagramWord {
-    let word: String
-    var scrambled: [Character]
-}
+// MARK: - Letter Tile
 
 struct AnagramLetterTile: Identifiable {
     let id = UUID()
@@ -14,588 +9,698 @@ struct AnagramLetterTile: Identifiable {
     var selectionOrder: Int? = nil
 }
 
-// MARK: - Game State
+// MARK: - Models
 
-enum AnagramGameState {
-    case idle
-    case playing
-    case finished
+enum AnagramDifficulty: String {
+    case easy = "Easy"
+    case medium = "Medium"
+    case hard = "Hard"
+
+    var wordLengthRange: ClosedRange<Int> {
+        switch self {
+        case .easy:   return 3...5
+        case .medium: return 5...7
+        case .hard:   return 7...10
+        }
+    }
+
+    var badgeColor: Color {
+        switch self {
+        case .easy:   return .green
+        case .medium: return .orange
+        case .hard:   return .red
+        }
+    }
 }
 
-// MARK: - View Model
+// MARK: - Word Bank
 
-class AnagramViewModel: ObservableObject {
-
-    private let wordList: [String] = [
-        "SWIFT", "APPLE", "PHONE", "CRANE", "GLOBE",
-        "TIGER", "LUNAR", "PRIZE", "FLAME", "STORM",
-        "BRAVE", "CLOUD", "DREAM", "FROST", "GROVE",
-        "HEART", "IVORY", "JEWEL", "KNACK", "LEMON"
-    ]
-
-    @Published var currentWordIndex: Int = 0
-    @Published var tiles: [AnagramLetterTile] = []
-    @Published var selectedOrder: [UUID] = []
-    @Published var timeLeft: Int = 30
-    @Published var score: Int = 0
-    @Published var gameState: AnagramGameState = .idle
-    @Published var shakeOffset: CGFloat = 0
-    @Published var feedbackMessage: String = ""
-    @Published var showFeedback: Bool = false
-
-    private var timer: Timer?
-    private var shakeTimer: Timer?
-
-    var currentWord: String {
-        guard currentWordIndex < wordList.count else { return "" }
-        return wordList[currentWordIndex]
-    }
-
-    var totalWords: Int { wordList.count }
-
-    var typedWord: String {
-        selectedOrder.compactMap { id in
-            tiles.first(where: { $0.id == id })?.character
-        }.map { String($0) }.joined()
-    }
-
-    func startGame() {
-        score = 0
-        currentWordIndex = 0
-        gameState = .playing
-        loadCurrentWord()
-        startTimer()
-    }
-
-    func loadCurrentWord() {
-        guard currentWordIndex < wordList.count else {
-            endGame()
-            return
-        }
-        let word = wordList[currentWordIndex]
-        let chars = Array(word)
-        // Shuffle until different from the original
-        var shuffled = chars.shuffled()
-        var attempts = 0
-        while shuffled == chars && attempts < 10 {
-            shuffled = chars.shuffled()
-            attempts += 1
-        }
-        tiles = shuffled.map { AnagramLetterTile(character: $0) }
-        selectedOrder = []
-        timeLeft = 30
-    }
-
-    func selectTile(id: UUID) {
-        guard gameState == .playing else { return }
-        guard let index = tiles.firstIndex(where: { $0.id == id }) else { return }
-        guard !tiles[index].isSelected else { return }
-
-        tiles[index].isSelected = true
-        tiles[index].selectionOrder = selectedOrder.count
-        selectedOrder.append(id)
-
-        // Check if all letters selected
-        if selectedOrder.count == currentWord.count {
-            checkAnswer()
-        }
-    }
-
-    func deselectLast() {
-        guard !selectedOrder.isEmpty else { return }
-        let lastId = selectedOrder.removeLast()
-        if let index = tiles.firstIndex(where: { $0.id == lastId }) {
-            tiles[index].isSelected = false
-            tiles[index].selectionOrder = nil
-        }
-        // Update selection orders
-        for i in tiles.indices {
-            if tiles[i].selectionOrder != nil {
-                if let pos = selectedOrder.firstIndex(of: tiles[i].id) {
-                    tiles[i].selectionOrder = pos
-                }
-            }
-        }
-    }
-
-    func clearSelection() {
-        for i in tiles.indices {
-            tiles[i].isSelected = false
-            tiles[i].selectionOrder = nil
-        }
-        selectedOrder = []
-    }
-
-    func skipWord() {
-        guard gameState == .playing else { return }
-        nextWord()
-    }
-
-    private func checkAnswer() {
-        let answer = typedWord
-        if answer == currentWord {
-            score += 1
-            showFeedbackMessage("Correct!")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                self.nextWord()
-            }
-        } else {
-            triggerShake()
-            showFeedbackMessage("Wrong order!")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.clearSelection()
-            }
-        }
-    }
-
-    private func nextWord() {
-        currentWordIndex += 1
-        if currentWordIndex >= wordList.count {
-            endGame()
-        } else {
-            loadCurrentWord()
-        }
-    }
-
-    private func endGame() {
-        gameState = .finished
-        timer?.invalidate()
-        timer = nil
-    }
-
-    private func startTimer() {
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            if self.timeLeft > 0 {
-                self.timeLeft -= 1
-            } else {
-                self.skipWord()
-            }
-        }
-    }
-
-    private func triggerShake() {
-        let shakeSequence: [CGFloat] = [-10, 10, -8, 8, -5, 5, 0]
-        var delay: Double = 0
-        for offset in shakeSequence {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                withAnimation(.easeInOut(duration: 0.05)) {
-                    self.shakeOffset = offset
-                }
-            }
-            delay += 0.06
-        }
-    }
-
-    private func showFeedbackMessage(_ msg: String) {
-        feedbackMessage = msg
-        withAnimation { showFeedback = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            withAnimation { self.showFeedback = false }
-        }
-    }
-
-    deinit {
-        timer?.invalidate()
-    }
-}
+private let anagramWordBank: [String] = [
+    // 3-4 letter words (easy)
+    "cat", "dog", "bat", "car", "sun", "run", "fan", "map", "cup", "art",
+    "hat", "jet", "log", "mud", "net", "owl", "pan", "rat", "sit", "top",
+    // 5-6 letter words (medium)
+    "angel", "bread", "chair", "dream", "earth", "flame", "grace", "heart",
+    "image", "juice", "kneel", "laser", "magic", "night", "ocean", "pizza",
+    "queen", "river", "smile", "tiger", "ultra", "voice", "water", "xenon",
+    "yacht", "zebra", "blast", "cloud", "dance", "eagle", "frost", "glare",
+    "hazel", "ivory", "jewel", "karma", "lance", "maple", "noble", "orbit",
+    // 7-10 letter words (hard)
+    "captain", "diamond", "element", "fashion", "garland", "harvest",
+    "iceberg", "journal", "kitchen", "lantern", "maximum", "network",
+    "olympus", "penguin", "quarrel", "rainbow", "silicon", "thermal",
+    "uniform", "venture", "warmest", "xylophone", "yearbook", "zeppelin",
+    "absolute", "beautiful", "champion", "daughter", "electric", "fearless",
+    "grateful", "hospital", "infinity", "jealousy", "keyboard", "laughter"
+]
 
 // MARK: - Main View
 
 struct AnagramView: View {
 
-    @StateObject private var viewModel = AnagramViewModel()
+    // MARK: Difficulty & Scoring
+    @State private var difficulty: AnagramDifficulty = .easy
+    @State private var roundScores: [Int] = []
+
+    // MARK: Game State
+    @State private var gamePhase: AnagramGamePhase = .idle
+    @State private var currentWord: String = ""
+    @State private var scrambledTiles: [AnagramLetterTile] = []
+    @State private var selectedTiles: [AnagramLetterTile] = []
+    @State private var wordIndex: Int = 0
+    @State private var score: Int = 0
+    @State private var timeRemaining: Double = 30
+    @State private var shakeOffset: CGFloat = 0
+    @State private var showCorrectFlash: Bool = false
+    @State private var gameTimer: Timer? = nil
+    @State private var usedWords: [String] = []
+
+    private let totalWords = 20
+    private let timePerWord: Double = 30
+
+    // MARK: Body
 
     var body: some View {
         ZStack {
-            // Background
-            LinearGradient(
-                colors: [Color(red: 0.08, green: 0.08, blue: 0.18), Color(red: 0.12, green: 0.05, blue: 0.22)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            switch viewModel.gameState {
+            anagramBackground
+            switch gamePhase {
             case .idle:
-                AnagramMenuView(onStart: { viewModel.startGame() })
+                anagramIdleScreen
             case .playing:
-                AnagramPlayView(viewModel: viewModel)
-            case .finished:
-                AnagramResultView(score: viewModel.score, total: viewModel.totalWords, onRestart: { viewModel.startGame() })
+                anagramPlayingScreen
+            case .gameOver:
+                anagramGameOverScreen
+            }
+        }
+        .preferredColorScheme(.none)
+        .onDisappear { stopTimer() }
+    }
+
+    // MARK: - Backgrounds
+
+    private var anagramBackground: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.05, green: 0.05, blue: 0.18),
+                Color(red: 0.10, green: 0.08, blue: 0.25),
+                Color(red: 0.05, green: 0.12, blue: 0.20)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+        .overlay(anagramStarField)
+    }
+
+    private var anagramStarField: some View {
+        GeometryReader { geo in
+            ForEach(0..<30, id: \.self) { i in
+                Circle()
+                    .fill(Color.white.opacity(Double.random(in: 0.05...0.25)))
+                    .frame(width: CGFloat.random(in: 1...3), height: CGFloat.random(in: 1...3))
+                    .position(
+                        x: CGFloat((i * 137) % Int(geo.size.width)),
+                        y: CGFloat((i * 97 + 50) % Int(geo.size.height))
+                    )
             }
         }
     }
-}
 
-// MARK: - Menu View
+    // MARK: - Idle Screen
 
-struct AnagramMenuView: View {
-    let onStart: () -> Void
-
-    var body: some View {
+    private var anagramIdleScreen: some View {
         VStack(spacing: 32) {
+            Spacer()
             VStack(spacing: 12) {
                 Text("ANAGRAM")
-                    .font(.system(size: 44, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-                    .shadow(color: .purple.opacity(0.8), radius: 12)
-
-                Text("Unscramble the letters!")
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                AnagramRuleRow(icon: "shuffle", text: "Tap letters in the correct order")
-                AnagramRuleRow(icon: "timer", text: "30 seconds per word")
-                AnagramRuleRow(icon: "list.number", text: "20 words total")
-                AnagramRuleRow(icon: "arrow.forward.circle", text: "Skip if you're stuck")
-            }
-            .padding(20)
-            .background(Color.white.opacity(0.07))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-
-            Button(action: onStart) {
-                Text("Start Game")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(
-                        LinearGradient(colors: [.purple, .blue], startPoint: .leading, endPoint: .trailing)
+                    .font(.system(size: 42, weight: .black, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.cyan, .purple], startPoint: .leading, endPoint: .trailing)
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .shadow(color: .purple.opacity(0.5), radius: 10)
-            }
-        }
-        .padding(28)
-    }
-}
-
-struct AnagramRuleRow: View {
-    let icon: String
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .foregroundColor(.purple)
-                .frame(width: 24)
-            Text(text)
-                .font(.system(size: 15, design: .rounded))
-                .foregroundColor(.white.opacity(0.85))
-        }
-    }
-}
-
-// MARK: - Play View
-
-struct AnagramPlayView: View {
-    @ObservedObject var viewModel: AnagramViewModel
-
-    var body: some View {
-        VStack(spacing: 24) {
-
-            // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Word \(viewModel.currentWordIndex + 1)/\(viewModel.totalWords)")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.6))
-                    Text("Score: \(viewModel.score)")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
-                Spacer()
-                AnagramTimerView(timeLeft: viewModel.timeLeft)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-
-            // Answer Display
-            AnagramAnswerDisplay(
-                targetLength: viewModel.currentWord.count,
-                selectedIds: viewModel.selectedOrder,
-                tiles: viewModel.tiles,
-                shakeOffset: viewModel.shakeOffset
-            )
-
-            // Feedback
-            if viewModel.showFeedback {
-                Text(viewModel.feedbackMessage)
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
-                    .foregroundColor(viewModel.feedbackMessage == "Correct!" ? .green : .red)
-                    .transition(.opacity.combined(with: .scale))
-            } else {
-                Text(" ")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                Text("Unscramble the word!")
+                    .font(.title3)
+                    .foregroundColor(.white.opacity(0.75))
             }
 
-            // Letter Tiles
-            AnagramTileGrid(tiles: viewModel.tiles) { id in
-                viewModel.selectTile(id: id)
-            }
-            .offset(x: viewModel.shakeOffset)
+            anagramDifficultyBadge(difficulty)
+                .scaleEffect(1.2)
 
-            // Controls
-            HStack(spacing: 16) {
-                Button(action: { viewModel.clearSelection() }) {
-                    Label("Clear", systemImage: "xmark.circle")
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.8))
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 18)
-                        .background(Color.white.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-
-                Button(action: { viewModel.deselectLast() }) {
-                    Label("Undo", systemImage: "arrow.uturn.backward.circle")
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.8))
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 18)
-                        .background(Color.white.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-
-                Button(action: { viewModel.skipWord() }) {
-                    Label("Skip", systemImage: "forward.fill")
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .foregroundColor(.orange)
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 18)
-                        .background(Color.orange.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
+            VStack(spacing: 10) {
+                anagramGlassLabel("20 words • 30 seconds each")
+                anagramGlassLabel("Difficulty adapts to your score")
             }
 
             Spacer()
-        }
-        .animation(.default, value: viewModel.showFeedback)
-    }
-}
 
-// MARK: - Answer Display
-
-struct AnagramAnswerDisplay: View {
-    let targetLength: Int
-    let selectedIds: [UUID]
-    let tiles: [AnagramLetterTile]
-    let shakeOffset: CGFloat
-
-    var selectedChars: [Character?] {
-        var chars: [Character?] = Array(repeating: nil, count: targetLength)
-        for (i, id) in selectedIds.enumerated() {
-            if i < targetLength, let tile = tiles.first(where: { $0.id == id }) {
-                chars[i] = tile.character
+            Button(action: startGame) {
+                Text("Start Game")
+                    .font(.title2.bold())
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(
+                        LinearGradient(colors: [.cyan, .purple], startPoint: .leading, endPoint: .trailing)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .shadow(color: .purple.opacity(0.4), radius: 12)
             }
-        }
-        return chars
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(0..<targetLength, id: \.self) { index in
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.white.opacity(0.08))
-                        .frame(width: 44, height: 52)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                        )
-
-                    if index < selectedChars.count, let char = selectedChars[index] {
-                        Text(String(char))
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                    }
-                }
-            }
-        }
-        .offset(x: shakeOffset)
-    }
-}
-
-// MARK: - Tile Grid
-
-struct AnagramTileGrid: View {
-    let tiles: [AnagramLetterTile]
-    let onTap: (UUID) -> Void
-
-    let columns = [
-        GridItem(.adaptive(minimum: 56), spacing: 10)
-    ]
-
-    var body: some View {
-        LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(tiles) { tile in
-                AnagramTileButton(tile: tile) {
-                    onTap(tile.id)
-                }
-            }
+            .padding(.horizontal, 40)
+            .padding(.bottom, 50)
         }
         .padding(.horizontal, 24)
     }
-}
 
-// MARK: - Tile Button
+    private func anagramGlassLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundColor(.white.opacity(0.85))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+    }
 
-struct AnagramTileButton: View {
-    let tile: AnagramLetterTile
-    let onTap: () -> Void
+    // MARK: - Playing Screen
 
-    var body: some View {
-        Button(action: {
-            if !tile.isSelected { onTap() }
-        }) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(tile.isSelected
-                          ? AnyShapeStyle(Color.purple.opacity(0.25))
-                          : AnyShapeStyle(LinearGradient(
-                            colors: [Color(white: 0.25), Color(white: 0.18)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                          ))
-                    )
-                    .frame(width: 56, height: 60)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(
-                                tile.isSelected ? Color.purple.opacity(0.6) : Color.white.opacity(0.15),
-                                lineWidth: tile.isSelected ? 2 : 1
-                            )
-                    )
-                    .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
-
-                if tile.isSelected {
-                    Text(String(tile.character))
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.3))
-                } else {
-                    Text(String(tile.character))
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
-            }
+    private var anagramPlayingScreen: some View {
+        VStack(spacing: 0) {
+            anagramHUD
+            Spacer()
+            anagramWordArea
+            Spacer()
+            anagramTileArea
+            Spacer(minLength: 12)
+            anagramControlRow
+            Spacer(minLength: 20)
         }
-        .disabled(tile.isSelected)
-        .scaleEffect(tile.isSelected ? 0.93 : 1.0)
-        .animation(.spring(response: 0.2, dampingFraction: 0.6), value: tile.isSelected)
-    }
-}
-
-// MARK: - Timer View
-
-struct AnagramTimerView: View {
-    let timeLeft: Int
-
-    var timerColor: Color {
-        if timeLeft > 15 { return .green }
-        if timeLeft > 8 { return .yellow }
-        return .red
+        .padding(.horizontal, 16)
     }
 
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.white.opacity(0.1), lineWidth: 4)
-                .frame(width: 56, height: 56)
-
-            Circle()
-                .trim(from: 0, to: CGFloat(timeLeft) / 30.0)
-                .stroke(timerColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                .frame(width: 56, height: 56)
-                .rotationEffect(.degrees(-90))
-                .animation(.linear(duration: 1), value: timeLeft)
-
-            Text("\(timeLeft)")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundColor(timerColor)
-        }
-    }
-}
-
-// MARK: - Result View
-
-struct AnagramResultView: View {
-    let score: Int
-    let total: Int
-    let onRestart: () -> Void
-
-    var percentage: Double { Double(score) / Double(total) }
-
-    var resultEmoji: String {
-        if percentage >= 0.9 { return "🏆" }
-        if percentage >= 0.7 { return "⭐" }
-        if percentage >= 0.5 { return "👍" }
-        return "💪"
-    }
-
-    var resultMessage: String {
-        if percentage >= 0.9 { return "Excellent!" }
-        if percentage >= 0.7 { return "Great Job!" }
-        if percentage >= 0.5 { return "Good Effort!" }
-        return "Keep Practicing!"
-    }
-
-    var body: some View {
-        VStack(spacing: 32) {
-            VStack(spacing: 8) {
-                Text(resultEmoji)
-                    .font(.system(size: 64))
-                Text(resultMessage)
-                    .font(.system(size: 30, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-            }
-
-            VStack(spacing: 12) {
-                Text("Final Score")
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
+    // HUD
+    private var anagramHUD: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Score")
+                    .font(.caption)
                     .foregroundColor(.white.opacity(0.6))
-
-                Text("\(score) / \(total)")
-                    .font(.system(size: 52, weight: .black, design: .rounded))
+                Text("\(score)")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
+            }
 
-                // Progress bar
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.white.opacity(0.1))
-                            .frame(height: 16)
+            Spacer()
 
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(
-                                LinearGradient(colors: [.purple, .blue], startPoint: .leading, endPoint: .trailing)
-                            )
-                            .frame(width: geo.size.width * CGFloat(percentage), height: 16)
-                            .animation(.easeOut(duration: 0.8), value: percentage)
+            anagramDifficultyBadge(difficulty)
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("Word \(wordIndex)/\(totalWords)")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.6))
+                Text(String(format: "%.0fs", timeRemaining))
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundColor(timeRemaining <= 8 ? .red : .white)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.top, 12)
+        .overlay(
+            GeometryReader { geo in
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(
+                        LinearGradient(colors: [.cyan, .purple], startPoint: .leading, endPoint: .trailing)
+                    )
+                    .frame(width: geo.size.width * CGFloat(timeRemaining / timePerWord), height: 4)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .animation(.linear(duration: 0.1), value: timeRemaining)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        )
+    }
+
+    // Word area
+    private var anagramWordArea: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.regularMaterial)
+                    .shadow(color: .black.opacity(0.3), radius: 10)
+
+                VStack(spacing: 10) {
+                    Text("Unscramble:")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.6))
+
+                    HStack(spacing: 6) {
+                        ForEach(Array(selectedTiles.enumerated()), id: \.element.id) { _, tile in
+                            anagramAnswerCell(tile)
+                        }
+                        // Empty slots
+                        ForEach(0..<(currentWord.count - selectedTiles.count), id: \.self) { _ in
+                            anagramEmptyCell
+                        }
+                    }
+                    .offset(x: shakeOffset)
+                    .animation(.spring(response: 0.15, dampingFraction: 0.3), value: shakeOffset)
+                }
+                .padding(20)
+            }
+            .frame(height: 110)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(showCorrectFlash ? Color.green : Color.white.opacity(0.15), lineWidth: 2)
+                    .animation(.easeOut(duration: 0.3), value: showCorrectFlash)
+            )
+        }
+    }
+
+    private func anagramAnswerCell(_ tile: AnagramLetterTile) -> some View {
+        Text(String(tile.character).uppercased())
+            .font(.system(size: 22, weight: .bold, design: .rounded))
+            .foregroundColor(.white)
+            .frame(width: 38, height: 44)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(
+                        LinearGradient(colors: [.cyan.opacity(0.8), .purple.opacity(0.8)],
+                                       startPoint: .topLeading,
+                                       endPoint: .bottomTrailing)
+                    )
+            )
+            .shadow(color: .cyan.opacity(0.3), radius: 4)
+    }
+
+    private var anagramEmptyCell: some View {
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Color.white.opacity(0.08))
+            .frame(width: 38, height: 44)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+            )
+    }
+
+    // Scrambled tiles
+    private var anagramTileArea: some View {
+        VStack(spacing: 12) {
+            Text("Tap letters in order")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.5))
+
+            let columns = min(scrambledTiles.count, 6)
+            let rows = Int(ceil(Double(scrambledTiles.count) / Double(columns)))
+            VStack(spacing: 10) {
+                ForEach(0..<rows, id: \.self) { row in
+                    HStack(spacing: 10) {
+                        ForEach(0..<columns, id: \.self) { col in
+                            let idx = row * columns + col
+                            if idx < scrambledTiles.count {
+                                anagramScrambledTile(idx)
+                            }
+                        }
                     }
                 }
-                .frame(height: 16)
-            }
-            .padding(24)
-            .background(Color.white.opacity(0.07))
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-
-            Button(action: onRestart) {
-                Text("Play Again")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(
-                        LinearGradient(colors: [.purple, .blue], startPoint: .leading, endPoint: .trailing)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .shadow(color: .purple.opacity(0.5), radius: 10)
             }
         }
-        .padding(28)
+        .padding(.vertical, 16)
+        .padding(.horizontal, 12)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
     }
+
+    private func anagramScrambledTile(_ idx: Int) -> some View {
+        let tile = scrambledTiles[idx]
+        return Button(action: { tapTile(at: idx) }) {
+            Text(String(tile.character).uppercased())
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .foregroundColor(tile.isSelected ? .gray : .white)
+                .frame(width: 48, height: 52)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(
+                            tile.isSelected
+                                ? AnyShapeStyle(Color.white.opacity(0.08))
+                                : AnyShapeStyle(LinearGradient(
+                                    colors: [
+                                        Color(red: 0.2, green: 0.2, blue: 0.45),
+                                        Color(red: 0.15, green: 0.15, blue: 0.35)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ))
+                        )
+                        .shadow(
+                            color: tile.isSelected ? .clear : .cyan.opacity(0.2),
+                            radius: tile.isSelected ? 0 : 6
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(
+                            tile.isSelected ? Color.white.opacity(0.05) : Color.white.opacity(0.2),
+                            lineWidth: 1
+                        )
+                )
+                .scaleEffect(tile.isSelected ? 0.92 : 1.0)
+                .animation(.spring(response: 0.2, dampingFraction: 0.6), value: tile.isSelected)
+        }
+        .disabled(tile.isSelected)
+    }
+
+    // Controls
+    private var anagramControlRow: some View {
+        HStack(spacing: 16) {
+            Button(action: clearSelection) {
+                Label("Clear", systemImage: "arrow.counterclockwise")
+                    .font(.subheadline.bold())
+                    .foregroundColor(.white.opacity(0.85))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    )
+            }
+
+            Button(action: skipWord) {
+                Label("Skip", systemImage: "forward.fill")
+                    .font(.subheadline.bold())
+                    .foregroundColor(.orange)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                    )
+            }
+        }
+    }
+
+    // MARK: - Game Over Screen
+
+    private var anagramGameOverScreen: some View {
+        ScrollView {
+            VStack(spacing: 28) {
+                Spacer(minLength: 30)
+
+                Text("Game Over!")
+                    .font(.system(size: 38, weight: .black, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.cyan, .purple], startPoint: .leading, endPoint: .trailing)
+                    )
+
+                // Score glass card
+                ZStack {
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(.regularMaterial)
+                        .shadow(color: .black.opacity(0.3), radius: 16)
+
+                    VStack(spacing: 16) {
+                        Text("Final Score")
+                            .font(.headline)
+                            .foregroundColor(.white.opacity(0.7))
+
+                        Text("\(score)")
+                            .font(.system(size: 72, weight: .black, design: .rounded))
+                            .foregroundStyle(
+                                LinearGradient(colors: [.cyan, .purple], startPoint: .top, endPoint: .bottom)
+                            )
+
+                        Text("out of \(totalWords)")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .padding(30)
+                }
+                .padding(.horizontal, 30)
+
+                // Stats row
+                HStack(spacing: 12) {
+                    anagramStatPill(label: "Difficulty", value: difficulty.rawValue, color: difficulty.badgeColor)
+                    anagramStatPill(label: "Avg (last 5)", value: anagramAverageScore, color: .cyan)
+                }
+                .padding(.horizontal, 20)
+
+                // History
+                if !roundScores.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Recent Rounds")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.5))
+                            .padding(.leading, 8)
+
+                        HStack(spacing: 8) {
+                            ForEach(Array(roundScores.enumerated()), id: \.offset) { _, s in
+                                VStack(spacing: 4) {
+                                    Text("\(s)")
+                                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                                        .foregroundColor(.white)
+                                    Text("/\(totalWords)")
+                                        .font(.caption2)
+                                        .foregroundColor(.white.opacity(0.5))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(.ultraThinMaterial)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+
+                Button(action: startGame) {
+                    Text("Play Again")
+                        .font(.title2.bold())
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
+                        .background(
+                            LinearGradient(colors: [.cyan, .purple], startPoint: .leading, endPoint: .trailing)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                        .shadow(color: .purple.opacity(0.4), radius: 12)
+                }
+                .padding(.horizontal, 40)
+                .padding(.bottom, 40)
+            }
+        }
+    }
+
+    private func anagramStatPill(label: String, value: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.55))
+            Text(value)
+                .font(.headline.bold())
+                .foregroundColor(color)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(color.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Difficulty Badge
+
+    private func anagramDifficultyBadge(_ diff: AnagramDifficulty) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(diff.badgeColor)
+                .frame(width: 8, height: 8)
+            Text(diff.rawValue)
+                .font(.caption.bold())
+                .foregroundColor(diff.badgeColor)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(diff.badgeColor.opacity(0.4), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Game Logic
+
+    private func startGame() {
+        score = 0
+        wordIndex = 0
+        usedWords = []
+        loadNextWord()
+        gamePhase = .playing
+        startTimer()
+    }
+
+    private func loadNextWord() {
+        let range = difficulty.wordLengthRange
+        let filtered = anagramWordBank.filter {
+            range.contains($0.count) && !usedWords.contains($0)
+        }
+        guard let word = filtered.randomElement() else {
+            // fallback to any unused word
+            let unused = anagramWordBank.filter { !usedWords.contains($0) }
+            if let fallback = unused.randomElement() {
+                setupWord(fallback)
+            } else {
+                endGame()
+            }
+            return
+        }
+        setupWord(word)
+    }
+
+    private func setupWord(_ word: String) {
+        currentWord = word
+        usedWords.append(word)
+        selectedTiles = []
+        var tiles = word.map { AnagramLetterTile(character: $0) }
+        // Ensure scramble differs from original
+        var attempts = 0
+        repeat {
+            tiles.shuffle()
+            attempts += 1
+        } while tiles.map({ $0.character }) == Array(word) && attempts < 20
+        scrambledTiles = tiles
+        timeRemaining = timePerWord
+    }
+
+    private func tapTile(at index: Int) {
+        guard !scrambledTiles[index].isSelected else { return }
+        scrambledTiles[index].isSelected = true
+        selectedTiles.append(scrambledTiles[index])
+        checkAnswer()
+    }
+
+    private func checkAnswer() {
+        guard selectedTiles.count == currentWord.count else { return }
+        let attempt = String(selectedTiles.map { $0.character })
+        if attempt == currentWord {
+            score += 1
+            showCorrectFlash = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                showCorrectFlash = false
+                advanceWord()
+            }
+        } else {
+            triggerShake()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                clearSelection()
+            }
+        }
+    }
+
+    private func triggerShake() {
+        let sequence: [CGFloat] = [10, -10, 8, -8, 5, -5, 0]
+        for (i, offset) in sequence.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.06) {
+                shakeOffset = offset
+            }
+        }
+    }
+
+    private func clearSelection() {
+        for i in scrambledTiles.indices {
+            scrambledTiles[i].isSelected = false
+        }
+        selectedTiles = []
+    }
+
+    private func skipWord() {
+        advanceWord()
+    }
+
+    private func advanceWord() {
+        wordIndex += 1
+        if wordIndex >= totalWords {
+            endGame()
+        } else {
+            loadNextWord()
+        }
+    }
+
+    private func endGame() {
+        stopTimer()
+        roundScores.append(score)
+        if roundScores.count > 5 { roundScores.removeFirst() }
+        adjustDifficulty()
+        gamePhase = .gameOver
+    }
+
+    // MARK: - Difficulty Adaptation
+
+    private var anagramAverageScore: String {
+        guard !roundScores.isEmpty else { return "-" }
+        let avg = Double(roundScores.reduce(0, +)) / Double(roundScores.count)
+        return String(format: "%.1f", avg)
+    }
+
+    private func adjustDifficulty() {
+        guard !roundScores.isEmpty else { return }
+        let avg = Double(roundScores.reduce(0, +)) / Double(roundScores.count)
+        let ratio = avg / Double(totalWords)
+        switch ratio {
+        case ..<0.35:
+            difficulty = .easy
+        case 0.35..<0.65:
+            difficulty = .medium
+        default:
+            difficulty = .hard
+        }
+    }
+
+    // MARK: - Timer
+
+    private func startTimer() {
+        stopTimer()
+        gameTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            guard gamePhase == .playing else { return }
+            if timeRemaining > 1 {
+                timeRemaining -= 1
+            } else {
+                timeRemaining = 0
+                advanceWord()
+            }
+        }
+    }
+
+    private func stopTimer() {
+        gameTimer?.invalidate()
+        gameTimer = nil
+    }
+}
+
+// MARK: - Game Phase
+
+enum AnagramGamePhase {
+    case idle, playing, gameOver
+}
+
+// MARK: - Preview
+
+#Preview {
+    AnagramView()
 }

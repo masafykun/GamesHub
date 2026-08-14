@@ -2,7 +2,7 @@
 
 > 100種類のミニゲームを、ひとつの SwiftUI アプリに。
 
-GamesHub は SwiftUI で実装した、100種類のミニゲームを収録したオールインワン・ゲームコレクション（iOS版）です。各ゲームはデザインを磨き込んだ複数バージョン（V2 / V3）で実装され、ハブ画面から好きなゲームをすぐに起動できます。
+GamesHub は SwiftUI で実装した、100種類のミニゲームを収録したオールインワン・ゲームコレクション（iOS版）です。ハブ画面から好きなゲームをすぐに起動できます。
 
 ![Platform](https://img.shields.io/badge/Platform-iOS%2017+-000000?style=flat-square&logo=apple) ![Swift](https://img.shields.io/badge/Swift-5.9-FA7343?style=flat-square&logo=swift&logoColor=white) ![SwiftUI](https://img.shields.io/badge/SwiftUI-0D96F6?style=flat-square&logo=swift&logoColor=white) ![XcodeGen](https://img.shields.io/badge/XcodeGen-project.yml-2196F3?style=flat-square) ![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)
 
@@ -23,7 +23,7 @@ GamesHub は SwiftUI で実装した、100種類のミニゲームを収録し�
 ## ✨ 特徴
 
 - **100 ミニゲーム** — Sudoku / Match3 / WordSearch / 2048 / Solitaire / Tetris など幅広いジャンルを収録
-- **磨き込みの V2 / V3 実装** — 主要ゲームはデザイン・操作性を改善した複数バージョンを用意
+- **1ゲーム1実装** — 以前は各ゲームを Base / V2 / V3 の3版持っていたが、遊び比べたうえで最良の1本に統合した（300ファイル・約11.5万行 → 100ファイル・約4.2万行）。遊びとして成立していないものは、その場で作り直している
 - **純 SwiftUI** — 外部ゲームエンジン非依存、すべてネイティブ実装
 - **ハブ型ナビゲーション** — 1画面から全ゲームへアクセス
 - **XcodeGen 管理** — `project.yml` からプロジェクトを再現可能に生成

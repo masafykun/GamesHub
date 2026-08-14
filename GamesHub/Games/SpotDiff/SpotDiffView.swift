@@ -2,76 +2,75 @@ import SwiftUI
 
 // MARK: - Data Types
 
-struct SpDfCell: Identifiable, Equatable {
+struct SpotDiffCell: Identifiable {
     let id: Int
     var color: Color
 }
 
-struct SpDfLevel {
+struct SpotDiffLevel {
     let leftColors: [Color]
     let diffIndices: Set<Int>
     let rightColors: [Color]
 }
 
-enum SpDfPhase {
+enum SpotDiffPhase {
     case start, playing, complete
 }
 
 // MARK: - Levels
 
-private let spDfLevels: [SpDfLevel] = {
-    let palette1: [Color] = [.red, .blue, .green, .yellow, .orange,
-                             .purple, .pink, .cyan, .mint, .indigo,
-                             .teal, .red, .blue, .green, .yellow,
-                             .orange, .purple, .pink, .cyan, .mint,
-                             .indigo, .teal, .red, .blue, .green]
-    var right1 = palette1
-    right1[2] = .brown
-    right1[11] = .gray
-    right1[18] = .white
+private let spDfLevels: [SpotDiffLevel] = {
+    let p1: [Color] = [.red, .blue, .green, .yellow, .orange,
+                       .purple, .pink, .cyan, .mint, .indigo,
+                       .teal, .red, .blue, .green, .yellow,
+                       .orange, .purple, .pink, .cyan, .mint,
+                       .indigo, .teal, .red, .blue, .green]
+    var r1 = p1; r1[2] = .brown; r1[11] = .gray; r1[18] = .white
 
-    let palette2: [Color] = [.cyan, .mint, .indigo, .teal, .pink,
-                             .red, .blue, .green, .yellow, .orange,
-                             .purple, .pink, .cyan, .mint, .indigo,
-                             .teal, .red, .blue, .green, .yellow,
-                             .orange, .purple, .pink, .cyan, .mint]
-    var right2 = palette2
-    right2[0] = .orange
-    right2[14] = .red
-    right2[22] = .teal
+    let p2: [Color] = [.cyan, .mint, .indigo, .teal, .pink,
+                       .red, .blue, .green, .yellow, .orange,
+                       .purple, .pink, .cyan, .mint, .indigo,
+                       .teal, .red, .blue, .green, .yellow,
+                       .orange, .purple, .pink, .cyan, .mint]
+    var r2 = p2; r2[0] = .orange; r2[14] = .red; r2[22] = .teal
 
-    let palette3: [Color] = [.purple, .orange, .teal, .cyan, .red,
-                             .blue, .green, .yellow, .indigo, .mint,
-                             .pink, .red, .blue, .green, .yellow,
-                             .orange, .purple, .cyan, .teal, .indigo,
-                             .mint, .pink, .red, .blue, .green]
-    var right3 = palette3
-    right3[4] = .purple
-    right3[9] = .pink
-    right3[20] = .orange
+    let p3: [Color] = [.purple, .orange, .teal, .cyan, .red,
+                       .blue, .green, .yellow, .indigo, .mint,
+                       .pink, .red, .blue, .green, .yellow,
+                       .orange, .purple, .cyan, .teal, .indigo,
+                       .mint, .pink, .red, .blue, .green]
+    var r3 = p3; r3[4] = .purple; r3[9] = .pink; r3[20] = .orange
 
     return [
-        SpDfLevel(leftColors: palette1, diffIndices: [2, 11, 18], rightColors: right1),
-        SpDfLevel(leftColors: palette2, diffIndices: [0, 14, 22], rightColors: right2),
-        SpDfLevel(leftColors: palette3, diffIndices: [4, 9, 20], rightColors: right3),
+        SpotDiffLevel(leftColors: p1, diffIndices: [2, 11, 18], rightColors: r1),
+        SpotDiffLevel(leftColors: p2, diffIndices: [0, 14, 22], rightColors: r2),
+        SpotDiffLevel(leftColors: p3, diffIndices: [4, 9, 20], rightColors: r3),
     ]
 }()
 
 // MARK: - Main View
 
 struct SpotDiffView: View {
-    @State private var phase: SpDfPhase = .start
+    @State private var phase: SpotDiffPhase = .start
     @State private var levelIndex: Int = 0
     @State private var foundIndices: Set<Int> = []
     @State private var wrongFlash: Set<Int> = []
     @State private var elapsed: Double = 0
-    @State private var timer: Timer? = nil
+    @State private var gameTimer: Timer? = nil
+    @State private var recentResults: [Bool] = []
+    @State private var speedMultiplier: Double = 1.0
 
-    private var level: SpDfLevel { spDfLevels[levelIndex % spDfLevels.count] }
+    private var level: SpotDiffLevel { spDfLevels[levelIndex % spDfLevels.count] }
 
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+            LinearGradient(
+                colors: [Color.indigo.opacity(0.8), Color.purple.opacity(0.9)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
             switch phase {
             case .start: startScreen
             case .playing: gameScreen
@@ -82,18 +81,21 @@ struct SpotDiffView: View {
 
     // MARK: Start Screen
     private var startScreen: some View {
-        VStack(spacing: 24) {
-            Text("Spot the Difference").font(.largeTitle.bold())
+        VStack(spacing: 28) {
+            Text("Spot the Difference")
+                .font(.largeTitle.bold())
+                .foregroundColor(.white)
             Text("Find 3 differences\nbetween LEFT and RIGHT grids")
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundColor(.white.opacity(0.8))
             Button(action: beginGame) {
                 Text("Start Game")
                     .font(.headline)
-                    .padding(.horizontal, 40).padding(.vertical, 14)
-                    .background(Color.blue)
                     .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 40).padding(.vertical, 14)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
             }
         }
         .padding()
@@ -103,38 +105,52 @@ struct SpotDiffView: View {
     private var gameScreen: some View {
         VStack(spacing: 16) {
             HStack {
-                Text("Level \(levelIndex + 1)").font(.headline)
+                Text("Level \(levelIndex + 1)")
+                    .font(.headline).foregroundColor(.white)
                 Spacer()
-                Text(String(format: "Time: %.1fs", elapsed)).font(.headline).monospacedDigit()
+                Text(String(format: "%.1fs", elapsed))
+                    .font(.headline.monospacedDigit()).foregroundColor(.white)
                 Spacer()
-                Text("Found: \(foundIndices.count)/3").font(.headline)
+                Text("\(foundIndices.count)/3")
+                    .font(.headline).foregroundColor(.white)
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
             .padding(.horizontal)
 
-            HStack(spacing: 20) {
-                gridView(isRight: false)
-                gridView(isRight: true)
+            if speedMultiplier > 1.0 {
+                Text("Speed Boost Active!")
+                    .font(.caption.bold())
+                    .foregroundColor(.yellow)
+            }
+
+            HStack(spacing: 16) {
+                gridPanel(isRight: false)
+                gridPanel(isRight: true)
             }
             .padding(.horizontal)
         }
     }
 
-    private func gridView(isRight: Bool) -> some View {
-        VStack(spacing: 4) {
+    private func gridPanel(isRight: Bool) -> some View {
+        VStack(spacing: 6) {
             Text(isRight ? "RIGHT" : "LEFT")
                 .font(.caption.bold())
-                .foregroundStyle(.secondary)
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(44), spacing: 4), count: 5), spacing: 4) {
+                .foregroundColor(.white.opacity(0.8))
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(40), spacing: 3), count: 5), spacing: 3) {
                 ForEach(0..<25, id: \.self) { idx in
                     let colors = isRight ? level.rightColors : level.leftColors
                     let isFound = isRight && foundIndices.contains(idx)
                     let isWrong = isRight && wrongFlash.contains(idx)
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(isFound ? Color.red.opacity(0.8) : (isWrong ? Color.red.opacity(0.4) : colors[idx]))
-                        .frame(width: 44, height: 44)
+                        .fill(isFound ? Color.red.opacity(0.85) : (isWrong ? Color.red.opacity(0.5) : colors[idx]))
+                        .frame(width: 40, height: 40)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
-                                .stroke(isFound ? Color.red : Color.clear, lineWidth: 2)
+                                .stroke(isFound ? Color.white : Color.white.opacity(0.2), lineWidth: isFound ? 2 : 1)
                         )
                         .onTapGesture {
                             if isRight { handleTap(idx) }
@@ -142,38 +158,55 @@ struct SpotDiffView: View {
                 }
             }
         }
+        .padding(10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
     }
 
     // MARK: Complete Screen
     private var completeScreen: some View {
         VStack(spacing: 24) {
-            Text("Level Complete!").font(.largeTitle.bold())
+            Text("Level Complete!")
+                .font(.largeTitle.bold())
+                .foregroundColor(.white)
             Text(String(format: "Time: %.1f seconds", elapsed))
                 .font(.title3)
-                .foregroundStyle(.secondary)
+                .foregroundColor(.white.opacity(0.8))
+            if speedMultiplier > 1.0 {
+                Text(String(format: "Speed: %.0fx", speedMultiplier))
+                    .font(.caption)
+                    .foregroundColor(.yellow)
+            }
             HStack(spacing: 16) {
                 if levelIndex + 1 < spDfLevels.count {
                     Button("Next Level") {
                         levelIndex += 1
                         beginGame()
                     }
-                    .font(.headline)
-                    .padding(.horizontal, 28).padding(.vertical, 12)
-                    .background(Color.green)
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .font(.headline).foregroundColor(.white)
+                    .padding(.horizontal, 24).padding(.vertical, 12)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
                 }
                 Button("Play Again") {
                     levelIndex = 0
+                    speedMultiplier = 1.0
+                    recentResults = []
                     beginGame()
                 }
-                .font(.headline)
-                .padding(.horizontal, 28).padding(.vertical, 12)
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .font(.headline).foregroundColor(.white)
+                .padding(.horizontal, 24).padding(.vertical, 12)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
             }
         }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
         .padding()
     }
 
@@ -183,8 +216,9 @@ struct SpotDiffView: View {
         wrongFlash = []
         elapsed = 0
         phase = .playing
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+        gameTimer?.invalidate()
+        let interval = 0.1 / speedMultiplier
+        gameTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             elapsed += 0.1
         }
     }
@@ -194,7 +228,14 @@ struct SpotDiffView: View {
         if level.diffIndices.contains(idx) {
             foundIndices.insert(idx)
             if foundIndices.count == 3 {
-                timer?.invalidate()
+                gameTimer?.invalidate()
+                // Record result and adapt difficulty
+                let success = elapsed < 30.0
+                recentResults.append(success)
+                if recentResults.count > 5 { recentResults.removeFirst() }
+                if recentResults.count == 5 && recentResults.filter({ $0 }).count > 4 {
+                    speedMultiplier = min(speedMultiplier * 1.2, 3.0)
+                }
                 phase = .complete
             }
         } else if !foundIndices.contains(idx) {

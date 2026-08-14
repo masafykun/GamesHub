@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Models (file-scoped)
+// MARK: - Models (, file-scoped)
 
 private struct BlackjackCard: Identifiable {
     let id = UUID()
@@ -43,15 +43,13 @@ private class BlackjackViewModel: ObservableObject {
     @Published var bet: Int = 100
     @Published var phase: BlackjackPhase = .betting
     @Published var result: BlackjackResult? = nil
-    @Published var isDealerRevealing: Bool = false
 
     private var deck: [BlackjackCard] = []
 
     var playerTotal: Int { calculateTotal(hand: playerHand) }
     var dealerTotal: Int { calculateTotal(hand: dealerHand) }
     var dealerVisibleTotal: Int {
-        let visible = dealerHand.filter { !$0.isFaceDown }
-        return calculateTotal(hand: visible)
+        calculateTotal(hand: dealerHand.filter { !$0.isFaceDown })
     }
 
     func calculateTotal(hand: [BlackjackCard]) -> Int {
@@ -74,7 +72,6 @@ private class BlackjackViewModel: ObservableObject {
         playerHand = []
         dealerHand = []
         result = nil
-        isDealerRevealing = false
 
         playerHand.append(draw())
         dealerHand.append(draw())
@@ -82,78 +79,52 @@ private class BlackjackViewModel: ObservableObject {
         var second = draw()
         second.isFaceDown = true
         dealerHand.append(second)
-
         chips -= bet
         phase = .playing
 
-        // Check for player blackjack
-        if playerTotal == 21 {
-            standAction()
-        }
+        if playerTotal == 21 { stand() }
     }
 
     func hit() {
         guard phase == .playing else { return }
         playerHand.append(draw())
-        if playerTotal > 21 {
-            revealAndFinish()
-        }
+        if playerTotal > 21 { revealAndFinish() }
     }
 
     func stand() {
-        guard phase == .playing else { return }
-        standAction()
-    }
-
-    private func standAction() {
+        guard phase == .playing || playerTotal == 21 else { return }
         phase = .dealerTurn
         revealAndFinish()
     }
 
     private func revealAndFinish() {
-        // Reveal face-down card
-        for i in dealerHand.indices {
-            dealerHand[i].isFaceDown = false
-        }
-        isDealerRevealing = true
-
-        // Dealer draws to 17
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.dealerDrawLoop()
-        }
+        for i in dealerHand.indices { dealerHand[i].isFaceDown = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.dealerDrawLoop() }
     }
 
     private func dealerDrawLoop() {
         if dealerTotal < 17 {
             dealerHand.append(draw())
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                self.dealerDrawLoop()
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.dealerDrawLoop() }
         } else {
             determineResult()
         }
     }
 
     private func determineResult() {
-        let pt = playerTotal
-        let dt = dealerTotal
-
+        let pt = playerTotal, dt = dealerTotal
         if pt > 21 {
             result = .playerBust
         } else if dt > 21 {
-            result = .dealerBust
-            chips += bet * 2
+            result = .dealerBust; chips += bet * 2
         } else if pt == 21 && playerHand.count == 2 && !(dt == 21 && dealerHand.count == 2) {
-            result = .blackjack
-            chips += Int(Double(bet) * 2.5)
+            result = .blackjack; chips += Int(Double(bet) * 2.5)
         } else if pt > dt {
-            result = .playerWin
-            chips += bet * 2
+            result = .playerWin; chips += bet * 2
         } else if dt > pt {
             result = .dealerWin
         } else {
-            result = .push
-            chips += bet
+            result = .push; chips += bet
         }
         phase = .result
     }
@@ -165,62 +136,68 @@ private class BlackjackViewModel: ObservableObject {
 
     func adjustBet(_ amount: Int) {
         let newBet = bet + amount
-        if newBet >= 50 && newBet <= chips {
-            bet = newBet
-        }
+        if newBet >= 50 && newBet <= chips { bet = newBet }
     }
 
     func dealAgain() {
-        if chips < 50 {
-            chips = 1000
-            bet = 100
-        }
-        phase = .betting
-        result = nil
+        if chips < 50 { chips = 1000; bet = 100 }
+        phase = .betting; result = nil
     }
 }
 
-// MARK: - Card View
+// MARK: - Glassmorphic Card View
 
-private struct CardView: View {
+private struct GlassCardView: View {
     let card: BlackjackCard
-
     var isRed: Bool { card.suit == "♥︎" || card.suit == "♦︎" }
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(card.isFaceDown ? Color.blue.opacity(0.8) : Color.white)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.gray.opacity(0.4), lineWidth: 1)
-                )
-                .shadow(radius: 3)
-
             if card.isFaceDown {
-                Image(systemName: "rectangle.pattern.checkered")
-                    .foregroundColor(.white.opacity(0.3))
-                    .font(.system(size: 24))
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.6), Color.purple.opacity(0.6)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                    )
+                    .overlay(
+                        Image(systemName: "sparkles")
+                            .foregroundColor(.white.opacity(0.4))
+                            .font(.system(size: 20))
+                    )
             } else {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                    )
+
                 VStack(spacing: 2) {
                     HStack {
                         VStack(alignment: .leading, spacing: 0) {
                             Text(card.rank)
                                 .font(.system(size: 14, weight: .bold))
                             Text(card.suit)
-                                .font(.system(size: 12))
+                                .font(.system(size: 11))
                         }
-                        .foregroundColor(isRed ? .red : .black)
+                        .foregroundColor(isRed ? Color(red: 1, green: 0.4, blue: 0.4) : .white)
                         Spacer()
                     }
-                    .padding(.horizontal, 4)
-                    .padding(.top, 4)
+                    .padding(.horizontal, 5)
+                    .padding(.top, 5)
 
                     Spacer()
 
                     Text(card.suit)
-                        .font(.system(size: 22))
-                        .foregroundColor(isRed ? .red : .black)
+                        .font(.system(size: 24))
+                        .foregroundColor(isRed ? Color(red: 1, green: 0.4, blue: 0.4) : .white)
+                        .shadow(color: isRed ? .red.opacity(0.6) : .cyan.opacity(0.6), radius: 6)
 
                     Spacer()
 
@@ -230,58 +207,87 @@ private struct CardView: View {
                             Text(card.rank)
                                 .font(.system(size: 14, weight: .bold))
                             Text(card.suit)
-                                .font(.system(size: 12))
+                                .font(.system(size: 11))
                         }
-                        .foregroundColor(isRed ? .red : .black)
+                        .foregroundColor(isRed ? Color(red: 1, green: 0.4, blue: 0.4) : .white)
                         .rotationEffect(.degrees(180))
                     }
-                    .padding(.horizontal, 4)
-                    .padding(.bottom, 4)
+                    .padding(.horizontal, 5)
+                    .padding(.bottom, 5)
                 }
             }
         }
-        .frame(width: 60, height: 88)
+        .frame(width: 62, height: 90)
+        .shadow(color: isRed ? Color.red.opacity(0.3) : Color.cyan.opacity(0.3), radius: 10)
     }
 }
 
-// MARK: - Hand View
+// MARK: - Glass Container
 
-private struct HandView: View {
-    let cards: [BlackjackCard]
-    let total: Int
-    let label: String
-    let showTotal: Bool
+private struct GlassContainer<Content: View>: View {
+    let content: Content
+    var accentColor: Color = .blue
+
+    init(accentColor: Color = .blue, @ViewBuilder content: () -> Content) {
+        self.accentColor = accentColor
+        self.content = content()
+    }
 
     var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Text(label)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                if showTotal {
-                    Text("\(total)")
-                        .font(.caption.bold())
-                        .foregroundColor(.primary)
-                }
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: -12) {
-                    ForEach(cards) { card in
-                        CardView(card: card)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
-                }
-                .padding(.horizontal, 4)
-            }
-        }
+        content
+            .padding(16)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(color: accentColor.opacity(0.3), radius: 16, x: 0, y: 8)
     }
 }
 
-// MARK: - Main View
+// MARK: - Glow Button
+
+private struct GlowButton: View {
+    let title: String
+    let color: Color
+    let action: () -> Void
+    var disabled: Bool = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.headline.bold())
+                .foregroundColor(disabled ? .gray : .white)
+                .frame(minWidth: 100, minHeight: 44)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(disabled ? Color.gray.opacity(0.3) : color.opacity(0.7))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(disabled ? Color.clear : color.opacity(0.8), lineWidth: 1)
+                        )
+                )
+                .shadow(color: disabled ? .clear : color.opacity(0.5), radius: 12, x: 0, y: 4)
+        }
+        .disabled(disabled)
+    }
+}
+
+// MARK: - Main  View
 
 struct BlackjackView: View {
     @StateObject private var vm = BlackjackViewModel()
+
+    private let bgGradient = LinearGradient(
+        colors: [
+            Color(red: 0.05, green: 0.05, blue: 0.2),
+            Color(red: 0.1, green: 0.0, blue: 0.25),
+            Color(red: 0.05, green: 0.1, blue: 0.3)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 
     var resultMessage: String {
         switch vm.result {
@@ -290,66 +296,129 @@ struct BlackjackView: View {
         case .push:        return "Push — Tie!"
         case .blackjack:   return "Blackjack! 1.5x"
         case .playerBust:  return "Bust! You Lose"
-        case .dealerBust:  return "Dealer Busts — You Win!"
+        case .dealerBust:  return "Dealer Busts!"
         case .none:        return ""
         }
     }
 
-    var resultColor: Color {
+    var resultGlow: Color {
         switch vm.result {
         case .playerWin, .dealerBust, .blackjack: return .green
         case .dealerWin, .playerBust:             return .red
         case .push:                               return .orange
-        case .none:                               return .primary
+        case .none:                               return .blue
         }
     }
 
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+            bgGradient.ignoresSafeArea()
 
-            VStack(spacing: 20) {
-                // Chip display
-                HStack {
-                    Image(systemName: "dollarsign.circle.fill")
-                        .foregroundColor(.yellow)
-                    Text("Chips: \(vm.chips)")
-                        .font(.title3.bold())
-                    Spacer()
-                    if vm.phase != .betting {
-                        Text("Bet: \(vm.bet)")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+            // Ambient orbs
+            Circle()
+                .fill(Color.purple.opacity(0.15))
+                .frame(width: 300, height: 300)
+                .blur(radius: 60)
+                .offset(x: -80, y: -200)
+            Circle()
+                .fill(Color.blue.opacity(0.12))
+                .frame(width: 250, height: 250)
+                .blur(radius: 50)
+                .offset(x: 100, y: 300)
+
+            VStack(spacing: 16) {
+                // Chip bar
+                GlassContainer(accentColor: .yellow) {
+                    HStack {
+                        Image(systemName: "crown.fill")
+                            .foregroundColor(.yellow)
+                            .shadow(color: .yellow.opacity(0.6), radius: 8)
+                        Text("Chips: \(vm.chips)")
+                            .font(.title3.bold())
+                            .foregroundColor(.white)
+                        Spacer()
+                        if vm.phase != .betting {
+                            HStack(spacing: 4) {
+                                Image(systemName: "dollarsign.circle")
+                                    .foregroundColor(.cyan)
+                                Text("Bet: \(vm.bet)")
+                                    .foregroundColor(.cyan)
+                                    .font(.subheadline.bold())
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal)
 
-                Divider()
-
-                // Dealer hand
-                VStack(alignment: .leading, spacing: 6) {
-                    HandView(
-                        cards: vm.dealerHand,
-                        total: vm.dealerVisibleTotal,
-                        label: "Dealer",
-                        showTotal: !vm.dealerHand.isEmpty
-                    )
+                // Dealer area
+                GlassContainer(accentColor: .purple) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("DEALER")
+                                .font(.caption.bold())
+                                .foregroundColor(.white.opacity(0.6))
+                                .tracking(2)
+                            if !vm.dealerHand.isEmpty {
+                                Text(vm.phase == .playing ? "?" : "\(vm.dealerTotal)")
+                                    .font(.caption.bold())
+                                    .foregroundColor(.purple)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(Capsule().fill(Color.purple.opacity(0.3)))
+                            }
+                        }
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: -10) {
+                                ForEach(vm.dealerHand) { card in
+                                    GlassCardView(card: card)
+                                        .transition(.asymmetric(
+                                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                                            removal: .opacity
+                                        ))
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
 
                 Spacer()
 
-                // Player hand
-                VStack(alignment: .leading, spacing: 6) {
-                    HandView(
-                        cards: vm.playerHand,
-                        total: vm.playerTotal,
-                        label: "You",
-                        showTotal: !vm.playerHand.isEmpty
-                    )
+                // Player area
+                GlassContainer(accentColor: .cyan) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("YOU")
+                                .font(.caption.bold())
+                                .foregroundColor(.white.opacity(0.6))
+                                .tracking(2)
+                            if !vm.playerHand.isEmpty {
+                                Text("\(vm.playerTotal)")
+                                    .font(.caption.bold())
+                                    .foregroundColor(vm.playerTotal > 21 ? .red : .cyan)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        Capsule()
+                                            .fill((vm.playerTotal > 21 ? Color.red : Color.cyan).opacity(0.3))
+                                    )
+                            }
+                        }
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: -10) {
+                                ForEach(vm.playerHand) { card in
+                                    GlassCardView(card: card)
+                                        .transition(.asymmetric(
+                                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                                            removal: .opacity
+                                        ))
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
 
                 // Controls
@@ -364,8 +433,8 @@ struct BlackjackView: View {
                 .padding(.bottom, 8)
             }
             .padding(.top)
-            .animation(.easeInOut(duration: 0.3), value: vm.playerHand.count)
-            .animation(.easeInOut(duration: 0.3), value: vm.dealerHand.count)
+            .animation(.easeInOut(duration: 0.35), value: vm.playerHand.count)
+            .animation(.easeInOut(duration: 0.35), value: vm.dealerHand.count)
 
             // Result overlay
             if vm.phase == .result, let _ = vm.result {
@@ -375,84 +444,101 @@ struct BlackjackView: View {
     }
 
     private var bettingControls: some View {
-        VStack(spacing: 12) {
-            Text("Place Your Bet")
-                .font(.headline)
+        GlassContainer(accentColor: .cyan) {
+            VStack(spacing: 14) {
+                Text("PLACE YOUR BET")
+                    .font(.caption.bold())
+                    .foregroundColor(.white.opacity(0.6))
+                    .tracking(2)
 
-            HStack(spacing: 20) {
-                Button("-50") { vm.adjustBet(-50) }
-                    .buttonStyle(.bordered)
-                    .disabled(vm.bet <= 50)
+                HStack(spacing: 16) {
+                    GlowButton(title: "-50", color: .red, action: { vm.adjustBet(-50) },
+                               disabled: vm.bet <= 50)
 
-                Text("\(vm.bet)")
-                    .font(.title2.bold())
-                    .frame(minWidth: 80)
+                    Text("\(vm.bet)")
+                        .font(.title.bold())
+                        .foregroundColor(.white)
+                        .frame(minWidth: 80)
+                        .shadow(color: .cyan.opacity(0.6), radius: 8)
 
-                Button("+50") { vm.adjustBet(50) }
-                    .buttonStyle(.bordered)
-                    .disabled(vm.bet + 50 > vm.chips)
+                    GlowButton(title: "+50", color: .green, action: { vm.adjustBet(50) },
+                               disabled: vm.bet + 50 > vm.chips)
+                }
+
+                GlowButton(title: "DEAL", color: .cyan, action: {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { vm.deal() }
+                }, disabled: vm.bet > vm.chips || vm.chips < 50)
+                .frame(maxWidth: .infinity)
             }
-
-            Button("Deal") {
-                withAnimation { vm.deal() }
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(vm.bet > vm.chips || vm.chips < 50)
         }
     }
 
     private var playingControls: some View {
-        HStack(spacing: 20) {
-            Button("Hit") {
-                withAnimation { vm.hit() }
+        GlassContainer(accentColor: .blue) {
+            HStack(spacing: 16) {
+                GlowButton(title: "HIT", color: .green, action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { vm.hit() }
+                })
+                GlowButton(title: "STAND", color: .red, action: {
+                    withAnimation(.easeInOut) { vm.stand() }
+                })
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.green)
-            .controlSize(.large)
-
-            Button("Stand") {
-                withAnimation { vm.stand() }
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
-            .controlSize(.large)
+            .frame(maxWidth: .infinity)
         }
     }
 
     private var resultOverlay: some View {
         ZStack {
-            Color.black.opacity(0.5).ignoresSafeArea()
+            Color.black.opacity(0.6).ignoresSafeArea()
+                .background(.ultraThinMaterial.opacity(0.3))
 
             VStack(spacing: 20) {
                 Text(resultMessage)
                     .font(.largeTitle.bold())
-                    .foregroundColor(resultColor)
+                    .foregroundColor(.white)
+                    .shadow(color: resultGlow.opacity(0.8), radius: 20)
 
-                VStack(spacing: 4) {
-                    Text("Your total: \(vm.playerTotal)")
-                    Text("Dealer total: \(vm.dealerTotal)")
+                VStack(spacing: 6) {
+                    HStack {
+                        Text("Your total:")
+                            .foregroundColor(.white.opacity(0.7))
+                        Text("\(vm.playerTotal)")
+                            .foregroundColor(.cyan)
+                            .bold()
+                    }
+                    HStack {
+                        Text("Dealer total:")
+                            .foregroundColor(.white.opacity(0.7))
+                        Text("\(vm.dealerTotal)")
+                            .foregroundColor(.purple)
+                            .bold()
+                    }
                 }
                 .font(.subheadline)
-                .foregroundColor(.white)
 
-                Text("Chips: \(vm.chips)")
-                    .font(.headline)
-                    .foregroundColor(.yellow)
-
-                Button("Deal Again") {
-                    withAnimation { vm.dealAgain() }
+                HStack {
+                    Image(systemName: "crown.fill")
+                        .foregroundColor(.yellow)
+                    Text("Chips: \(vm.chips)")
+                        .font(.headline.bold())
+                        .foregroundColor(.yellow)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .shadow(color: .yellow.opacity(0.5), radius: 10)
+
+                GlowButton(title: "DEAL AGAIN", color: resultGlow) {
+                    withAnimation(.spring(response: 0.4)) { vm.dealAgain() }
+                }
             }
             .padding(32)
-            .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(.secondarySystemBackground))
-                    .shadow(radius: 20)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 24))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24)
+                    .stroke(resultGlow.opacity(0.5), lineWidth: 1.5)
             )
+            .shadow(color: resultGlow.opacity(0.4), radius: 30, x: 0, y: 10)
             .padding(40)
         }
+        .transition(.opacity.combined(with: .scale(scale: 0.9)))
     }
 }

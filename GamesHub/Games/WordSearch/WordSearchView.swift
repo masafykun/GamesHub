@@ -2,527 +2,673 @@ import SwiftUI
 
 // MARK: - Models
 
-struct WordSearchPuzzle {
-    let grid: [[Character]]
-    let words: [String]
-    let placements: [WordSearchPlacement]
-}
+enum WordSearchDifficulty: String {
+    case easy = "Easy"
+    case medium = "Medium"
+    case hard = "Hard"
 
-struct WordSearchPlacement {
-    let word: String
-    let row: Int
-    let col: Int
-    let isHorizontal: Bool
-}
-
-struct WordSearchFoundWord {
-    let word: String
-    let cells: Set<WordSearchCell>
-    let color: Color
-}
-
-struct WordSearchCell: Hashable {
-    let row: Int
-    let col: Int
-    var letter: Character = " "
-    var foundWordIndex: Int? = nil
-
-    init(row: Int = 0, col: Int = 0) {
-        self.row = row
-        self.col = col
-    }
-
-    func hash(into hasher: inout Hasher) { hasher.combine(row); hasher.combine(col) }
-    static func == (lhs: WordSearchCell, rhs: WordSearchCell) -> Bool {
-        lhs.row == rhs.row && lhs.col == rhs.col
-    }
-}
-
-// MARK: - Puzzle Sets
-
-struct WordSearchPuzzleSet {
-    static let puzzles: [WordSearchPuzzle] = [puzzle1, puzzle2, puzzle3]
-
-    static let puzzle1: WordSearchPuzzle = {
-        let words = ["SWIFT", "APPLE", "CLOUD", "GRAPH", "STACK", "QUEUE", "ARRAY", "LOOPS"]
-        var grid: [[Character]] = Array(repeating: Array(repeating: "A", count: 10), count: 10)
-        let placements: [WordSearchPlacement] = [
-            WordSearchPlacement(word: "SWIFT", row: 0, col: 0, isHorizontal: true),
-            WordSearchPlacement(word: "APPLE", row: 2, col: 3, isHorizontal: true),
-            WordSearchPlacement(word: "CLOUD", row: 4, col: 5, isHorizontal: true),
-            WordSearchPlacement(word: "GRAPH", row: 7, col: 0, isHorizontal: true),
-            WordSearchPlacement(word: "STACK", row: 0, col: 7, isHorizontal: false),
-            WordSearchPlacement(word: "QUEUE", row: 1, col: 2, isHorizontal: false),
-            WordSearchPlacement(word: "ARRAY", row: 5, col: 9, isHorizontal: false),
-            WordSearchPlacement(word: "LOOPS", row: 5, col: 0, isHorizontal: false),
-        ]
-
-        let fills: [Character] = ["B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","R","T","U","V","W","X","Y","Z"]
-        var rng = WordSearchRNG(seed: 42)
-        for r in 0..<10 {
-            for c in 0..<10 {
-                grid[r][c] = fills[rng.next() % fills.count]
-            }
+    var color: Color {
+        switch self {
+        case .easy: return .green
+        case .medium: return .orange
+        case .hard: return .red
         }
-        for p in placements {
-            for i in 0..<p.word.count {
-                let ch = p.word[p.word.index(p.word.startIndex, offsetBy: i)]
-                if p.isHorizontal {
-                    if p.col + i < 10 { grid[p.row][p.col + i] = ch }
-                } else {
-                    if p.row + i < 10 { grid[p.row + i][p.col] = ch }
+    }
+
+    var gridSize: Int {
+        switch self {
+        case .easy: return 8
+        case .medium: return 10
+        case .hard: return 12
+        }
+    }
+
+    var wordCount: Int {
+        switch self {
+        case .easy: return 5
+        case .medium: return 8
+        case .hard: return 10
+        }
+    }
+}
+
+// MARK: - Puzzle Data
+
+struct WordSearchPuzzleData {
+    static let allWordPools: [[String]] = [
+        ["SWIFT", "APPLE", "XCODE", "BUILD", "CLOUD", "STORE", "WATCH", "PHONE", "TABLE", "MUSIC"],
+        ["OCEAN", "RIVER", "MOUNT", "STORM", "PLAIN", "FOREST", "DESERT", "ISLAND", "CREEK", "VALLEY"],
+        ["PIZZA", "BREAD", "PASTA", "SALAD", "CURRY", "SUSHI", "TACOS", "CREPE", "BAGEL", "TOAST"],
+        ["TIGER", "EAGLE", "SHARK", "WHALE", "COBRA", "PANDA", "KOALA", "LLAMA", "BISON", "CRANE"],
+        ["CHESS", "POKER", "DARTS", "RUGBY", "TENNIS", "SOCCER", "GOLF", "SWIM", "SKATE", "BOWL"]
+    ]
+
+    /// Places as many words as it can and reports which ones made it in,
+    /// so the puzzle never lists a word that is not actually in the grid.
+    static func buildGrid(words: [String], size: Int) -> (grid: [[Character]], placed: [String]) {
+        var cells: [[Character?]] = Array(repeating: Array(repeating: nil, count: size), count: size)
+        let letters: [Character] = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        var placed: [String] = []
+
+        for word in words {
+            let chars = Array(word)
+            guard chars.count <= size else { continue }
+
+            var attempts = 0
+            while attempts < 300 {
+                attempts += 1
+                let horizontal = Bool.random()
+                let rowLimit = horizontal ? size : size - chars.count + 1
+                let colLimit = horizontal ? size - chars.count + 1 : size
+                let row = Int.random(in: 0..<rowLimit)
+                let col = Int.random(in: 0..<colLimit)
+
+                var canPlace = true
+                for (i, ch) in chars.enumerated() {
+                    let r = horizontal ? row : row + i
+                    let c = horizontal ? col + i : col
+                    if let existing = cells[r][c], existing != ch {
+                        canPlace = false
+                        break
+                    }
                 }
-            }
-        }
-        return WordSearchPuzzle(grid: grid, words: words, placements: placements)
-    }()
+                guard canPlace else { continue }
 
-    static let puzzle2: WordSearchPuzzle = {
-        let words = ["TIGER", "EAGLE", "SHARK", "WHALE", "BISON", "KOALA", "PANDA", "ZEBRA"]
-        var grid: [[Character]] = Array(repeating: Array(repeating: "A", count: 10), count: 10)
-        let placements: [WordSearchPlacement] = [
-            WordSearchPlacement(word: "TIGER", row: 0, col: 0, isHorizontal: true),
-            WordSearchPlacement(word: "EAGLE", row: 2, col: 4, isHorizontal: true),
-            WordSearchPlacement(word: "SHARK", row: 4, col: 0, isHorizontal: true),
-            WordSearchPlacement(word: "WHALE", row: 6, col: 5, isHorizontal: true),
-            WordSearchPlacement(word: "BISON", row: 1, col: 1, isHorizontal: false),
-            WordSearchPlacement(word: "KOALA", row: 0, col: 8, isHorizontal: false),
-            WordSearchPlacement(word: "PANDA", row: 4, col: 6, isHorizontal: false),
-            WordSearchPlacement(word: "ZEBRA", row: 5, col: 3, isHorizontal: false),
-        ]
-
-        let fills: [Character] = ["B","C","D","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
-        var rng = WordSearchRNG(seed: 77)
-        for r in 0..<10 {
-            for c in 0..<10 {
-                grid[r][c] = fills[rng.next() % fills.count]
-            }
-        }
-        for p in placements {
-            for i in 0..<p.word.count {
-                let ch = p.word[p.word.index(p.word.startIndex, offsetBy: i)]
-                if p.isHorizontal {
-                    if p.col + i < 10 { grid[p.row][p.col + i] = ch }
-                } else {
-                    if p.row + i < 10 { grid[p.row + i][p.col] = ch }
+                for (i, ch) in chars.enumerated() {
+                    let r = horizontal ? row : row + i
+                    let c = horizontal ? col + i : col
+                    cells[r][c] = ch
                 }
-            }
-        }
-        return WordSearchPuzzle(grid: grid, words: words, placements: placements)
-    }()
-
-    static let puzzle3: WordSearchPuzzle = {
-        let words = ["PIANO", "FLUTE", "DRUMS", "VIOLA", "BANJO", "CELLO", "OBOES", "HORNS"]
-        var grid: [[Character]] = Array(repeating: Array(repeating: "A", count: 10), count: 10)
-        let placements: [WordSearchPlacement] = [
-            WordSearchPlacement(word: "PIANO", row: 0, col: 0, isHorizontal: true),
-            WordSearchPlacement(word: "FLUTE", row: 2, col: 2, isHorizontal: true),
-            WordSearchPlacement(word: "DRUMS", row: 5, col: 0, isHorizontal: true),
-            WordSearchPlacement(word: "VIOLA", row: 8, col: 4, isHorizontal: true),
-            WordSearchPlacement(word: "BANJO", row: 0, col: 6, isHorizontal: false),
-            WordSearchPlacement(word: "CELLO", row: 2, col: 9, isHorizontal: false),
-            WordSearchPlacement(word: "OBOES", row: 4, col: 4, isHorizontal: false),
-            WordSearchPlacement(word: "HORNS", row: 5, col: 2, isHorizontal: false),
-        ]
-
-        let fills: [Character] = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","P","Q","R","S","T","U","V","W","X","Y","Z"]
-        var rng = WordSearchRNG(seed: 123)
-        for r in 0..<10 {
-            for c in 0..<10 {
-                grid[r][c] = fills[rng.next() % fills.count]
-            }
-        }
-        for p in placements {
-            for i in 0..<p.word.count {
-                let ch = p.word[p.word.index(p.word.startIndex, offsetBy: i)]
-                if p.isHorizontal {
-                    if p.col + i < 10 { grid[p.row][p.col + i] = ch }
-                } else {
-                    if p.row + i < 10 { grid[p.row + i][p.col] = ch }
-                }
-            }
-        }
-        return WordSearchPuzzle(grid: grid, words: words, placements: placements)
-    }()
-}
-
-// MARK: - Simple RNG (deterministic fill)
-
-struct WordSearchRNG {
-    var state: Int
-    init(seed: Int) { state = seed }
-    mutating func next() -> Int {
-        state = (state &* 1664525 &+ 1013904223) & 0x7fffffff
-        return abs(state)
-    }
-}
-
-// MARK: - Colors
-
-let wordSearchColors: [Color] = [
-    .red, .blue, .green, .orange, .purple, .pink, .teal, .indigo
-]
-
-// MARK: - ViewModel
-
-class WordSearchViewModel: ObservableObject {
-    @Published var puzzle: WordSearchPuzzle
-    @Published var foundWords: [WordSearchFoundWord] = []
-    @Published var selectedCells: Set<WordSearchCell> = []
-    @Published var elapsedTime: Int = 0
-    @Published var gameWon: Bool = false
-    @Published var puzzleIndex: Int = 0
-
-    private var timer: Foundation.Timer?
-
-    init() {
-        puzzle = WordSearchPuzzleSet.puzzles[0]
-        startTimer()
-    }
-
-    func startTimer() {
-        timer?.invalidate()
-        timer = Foundation.Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self, !self.gameWon else { return }
-            self.elapsedTime += 1
-        }
-    }
-
-    func loadPuzzle(index: Int) {
-        puzzleIndex = index
-        puzzle = WordSearchPuzzleSet.puzzles[index]
-        foundWords = []
-        selectedCells = []
-        elapsedTime = 0
-        gameWon = false
-        startTimer()
-    }
-
-    func commitSelection() {
-        guard !selectedCells.isEmpty else { return }
-        let cells = selectedCells.sorted { ($0.row, $0.col) < ($1.row, $1.col) }
-        let word = cells.map { String(puzzle.grid[$0.row][$0.col]) }.joined()
-        let wordReversed = String(word.reversed())
-
-        let alreadyFound = foundWords.map { $0.word }
-
-        for candidate in [word, wordReversed] {
-            if puzzle.words.contains(candidate) && !alreadyFound.contains(candidate) {
-                let colorIndex = foundWords.count % wordSearchColors.count
-                let found = WordSearchFoundWord(word: candidate, cells: selectedCells, color: wordSearchColors[colorIndex])
-                foundWords.append(found)
-                if foundWords.count == puzzle.words.count {
-                    gameWon = true
-                    timer?.invalidate()
-                }
+                placed.append(word)
                 break
             }
         }
-        selectedCells = []
-    }
 
-    func cellInFoundWord(_ cell: WordSearchCell) -> Color? {
-        for found in foundWords {
-            if found.cells.contains(cell) {
-                return found.color
-            }
-        }
-        return nil
-    }
-
-    func formattedTime() -> String {
-        let m = elapsedTime / 60
-        let s = elapsedTime % 60
-        return String(format: "%02d:%02d", m, s)
+        let grid = cells.map { row in row.map { $0 ?? letters.randomElement()! } }
+        return (grid, placed)
     }
 }
 
 // MARK: - Main View
 
 struct WordSearchView: View {
-    @StateObject private var vm = WordSearchViewModel()
-    @State private var dragStart: WordSearchCell? = nil
-    @State private var dragCurrent: WordSearchCell? = nil
+    @State var roundScores: [Int] = []
+    @State private var difficulty: WordSearchDifficulty = .medium
+    @State private var grid: [[Character]] = []
+    @State private var words: [String] = []
+    @State private var foundWords: Set<String> = []
+    @State private var selectedCells: [(Int, Int)] = []
+    @State private var highlightedCells: [String: [(Int, Int)]] = [:]
+    @State private var wordColors: [String: Color] = [:]
+    @State private var elapsedTime: Int = 0
+    @State private var timerActive = false
+    @State private var gameOver = false
+    @State private var gameStarted = false
+    @State private var dragStart: (Int, Int)? = nil
+    @State private var dragCurrent: (Int, Int)? = nil
+    @State private var timer: Timer? = nil
+    @State private var showDifficultyBadge = true
+    @State private var movingAverage: Double = 0
+    @State private var gridSize: Int = 10
+    @State private var score: Int = 0
+
+    let wordColorPalette: [Color] = [
+        .blue, .green, .orange, .purple, .pink, .red, .teal, .yellow, .cyan, .indigo
+    ]
 
     var body: some View {
+        ZStack {
+            // Background gradient
+            LinearGradient(
+                colors: [
+                    Color(red: 0.08, green: 0.08, blue: 0.18),
+                    Color(red: 0.12, green: 0.05, blue: 0.20)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            if !gameStarted {
+                startScreen
+            } else if gameOver {
+                gameOverScreen
+            } else {
+                gameScreen
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Start Screen
+
+    var startScreen: some View {
+        VStack(spacing: 32) {
+            VStack(spacing: 8) {
+                Text("Word Search")
+                    .font(.system(size: 42, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Drag across the letters to find every word")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+            }
+
+            // Difficulty badge
+            difficultyBadgeView(difficulty: difficulty)
+
+            if !roundScores.isEmpty {
+                VStack(spacing: 6) {
+                    Text("Moving Average")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.6))
+                    Text(String(format: "%.0fs", movingAverage))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
+
+            VStack(spacing: 8) {
+                Text("Grid: \(difficulty.gridSize)x\(difficulty.gridSize)")
+                    .foregroundColor(.white.opacity(0.8))
+                Text("Words: \(difficulty.wordCount)")
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            .font(.system(size: 16, weight: .medium))
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            Button(action: startGame) {
+                Text("Start Game")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .frame(width: 200, height: 56)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.blue, Color.purple],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .clipShape(Capsule())
+                    .shadow(color: .blue.opacity(0.5), radius: 12, x: 0, y: 6)
+            }
+        }
+        .padding()
+    }
+
+    // MARK: - Game Screen
+
+    var gameScreen: some View {
         GeometryReader { geo in
-            let gridSize = min(geo.size.width - 32, geo.size.height * 0.55)
-            let cellSize = gridSize / 10
-
-            ZStack {
-                Color(.systemGray6).ignoresSafeArea()
-
-                VStack(spacing: 12) {
+            ScrollView {
+                VStack(spacing: 16) {
                     // Header
                     HStack {
-                        Text("Word Search")
-                            .font(.title2.bold())
+                        difficultyBadgeView(difficulty: difficulty)
                         Spacer()
-                        Text(vm.formattedTime())
-                            .font(.title3.monospacedDigit())
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal)
-
-                    // Found count
-                    HStack {
-                        Text("Found: \(vm.foundWords.count) / \(vm.puzzle.words.count)")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        // Puzzle selector
-                        HStack(spacing: 6) {
-                            ForEach(0..<WordSearchPuzzleSet.puzzles.count, id: \.self) { idx in
-                                Button {
-                                    vm.loadPuzzle(index: idx)
-                                } label: {
-                                    Text("\(idx + 1)")
-                                        .font(.caption.bold())
-                                        .frame(width: 28, height: 28)
-                                        .background(vm.puzzleIndex == idx ? Color.blue : Color(.systemGray4))
-                                        .foregroundColor(vm.puzzleIndex == idx ? .white : .primary)
-                                        .clipShape(Circle())
-                                }
-                            }
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(timeString(elapsedTime))
+                                .font(.system(size: 22, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+                            Text("\(foundWords.count)/\(words.count) found")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
                         }
                     }
                     .padding(.horizontal)
+                    .padding(.top, 8)
 
                     // Grid
-                    WordSearchGridView(
-                        vm: vm,
-                        gridSize: gridSize,
-                        cellSize: cellSize,
-                        dragStart: $dragStart,
-                        dragCurrent: $dragCurrent
-                    )
-                    .frame(width: gridSize, height: gridSize)
-                    .neumorphicCard(radius: 12)
-                    .padding(.horizontal)
+                    let cellSize = min((geo.size.width - 40) / CGFloat(gridSize), 40)
+                    let totalGridWidth = cellSize * CGFloat(gridSize)
+
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(.ultraThinMaterial)
+                            .shadow(color: .black.opacity(0.4), radius: 12, x: 0, y: 6)
+
+                        gridView(cellSize: cellSize, totalWidth: totalGridWidth)
+                            .padding(8)
+                    }
+                    .frame(width: totalGridWidth + 16, height: totalGridWidth + 16)
+                    .padding(.horizontal, (geo.size.width - totalGridWidth - 16) / 2)
 
                     // Word list
-                    WordSearchWordListView(vm: vm)
+                    wordListView
                         .padding(.horizontal)
 
-                    Spacer()
-                }
-                .padding(.top, 16)
-
-                // Win overlay
-                if vm.gameWon {
-                    WordSearchWinOverlay(vm: vm)
+                    Spacer(minLength: 20)
                 }
             }
         }
     }
-}
 
-// MARK: - Grid View
+    func gridView(cellSize: CGFloat, totalWidth: CGFloat) -> some View {
+        let totalHeight = cellSize * CGFloat(gridSize)
 
-struct WordSearchGridView: View {
-    @ObservedObject var vm: WordSearchViewModel
-    let gridSize: CGFloat
-    let cellSize: CGFloat
-    @Binding var dragStart: WordSearchCell?
-    @Binding var dragCurrent: WordSearchCell?
-
-    var highlightedCells: Set<WordSearchCell> {
-        guard let start = dragStart, let current = dragCurrent else { return [] }
-        return cellsBetween(start: start, end: current)
-    }
-
-    var body: some View {
-        ZStack {
-            Canvas { context, size in
-                let cs = size.width / 10
-
-                // Draw found word highlights
-                for found in vm.foundWords {
-                    let cells = found.cells.sorted { ($0.row * 10 + $0.col) < ($1.row * 10 + $1.col) }
-                    guard !cells.isEmpty else { continue }
-                    if cells.count == 1 {
-                        let c = cells[0]
-                        let rect = CGRect(x: CGFloat(c.col) * cs + 2, y: CGFloat(c.row) * cs + 2, width: cs - 4, height: cs - 4)
-                        context.fill(Path(ellipseIn: rect), with: .color(found.color.opacity(0.4)))
-                    } else {
-                        let first = cells.first!
-                        let last = cells.last!
-                        let isH = first.row == last.row
-                        let x1 = CGFloat(first.col) * cs + cs / 2
-                        let y1 = CGFloat(first.row) * cs + cs / 2
-                        let x2 = CGFloat(last.col) * cs + cs / 2
-                        let y2 = CGFloat(last.row) * cs + cs / 2
-                        let thickness = cs * 0.75
-
-                        var path = Path()
-                        if isH {
-                            path.addRoundedRect(in: CGRect(x: x1 - thickness/2, y: y1 - thickness/2, width: x2 - x1 + thickness, height: thickness), cornerSize: CGSize(width: thickness/2, height: thickness/2))
-                        } else {
-                            path.addRoundedRect(in: CGRect(x: x1 - thickness/2, y: y1 - thickness/2, width: thickness, height: y2 - y1 + thickness), cornerSize: CGSize(width: thickness/2, height: thickness/2))
-                        }
-                        context.fill(path, with: .color(found.color.opacity(0.35)))
+        return ZStack(alignment: .topLeading) {
+            // Highlight layers
+            ForEach(Array(highlightedCells.keys), id: \.self) { word in
+                if let cells = highlightedCells[word], let color = wordColors[word] {
+                    ForEach(0..<cells.count, id: \.self) { i in
+                        let cell = cells[i]
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(color.opacity(0.4))
+                            .frame(width: cellSize - 2, height: cellSize - 2)
+                            .offset(
+                                x: CGFloat(cell.1) * cellSize + 1,
+                                y: CGFloat(cell.0) * cellSize + 1
+                            )
                     }
                 }
+            }
 
-                // Draw current selection highlight
-                if !highlightedCells.isEmpty {
-                    let cells = highlightedCells.sorted { ($0.row * 10 + $0.col) < ($1.row * 10 + $1.col) }
-                    let first = cells.first!
-                    let last = cells.last!
-                    let isH = first.row == last.row
-                    let x1 = CGFloat(first.col) * cs + cs / 2
-                    let y1 = CGFloat(first.row) * cs + cs / 2
-                    let x2 = CGFloat(last.col) * cs + cs / 2
-                    let y2 = CGFloat(last.row) * cs + cs / 2
-                    let thickness = cs * 0.75
-
-                    var path = Path()
-                    if cells.count == 1 {
-                        path.addEllipse(in: CGRect(x: x1 - thickness/2, y: y1 - thickness/2, width: thickness, height: thickness))
-                    } else if isH {
-                        path.addRoundedRect(in: CGRect(x: x1 - thickness/2, y: y1 - thickness/2, width: x2 - x1 + thickness, height: thickness), cornerSize: CGSize(width: thickness/2, height: thickness/2))
-                    } else {
-                        path.addRoundedRect(in: CGRect(x: x1 - thickness/2, y: y1 - thickness/2, width: thickness, height: y2 - y1 + thickness), cornerSize: CGSize(width: thickness/2, height: thickness/2))
-                    }
-                    context.fill(path, with: .color(Color.yellow.opacity(0.4)))
-                }
+            // Drag selection highlight
+            ForEach(0..<selectedCells.count, id: \.self) { i in
+                let cell = selectedCells[i]
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.white.opacity(0.25))
+                    .frame(width: cellSize - 2, height: cellSize - 2)
+                    .offset(
+                        x: CGFloat(cell.1) * cellSize + 1,
+                        y: CGFloat(cell.0) * cellSize + 1
+                    )
             }
 
             // Letter cells
             VStack(spacing: 0) {
-                ForEach(0..<10, id: \.self) { row in
+                ForEach(0..<gridSize, id: \.self) { row in
                     HStack(spacing: 0) {
-                        ForEach(0..<10, id: \.self) { col in
-                            let cell = WordSearchCell(row: row, col: col)
-                            let isHighlighted = highlightedCells.contains(cell)
-                            let foundColor = vm.cellInFoundWord(cell)
-
-                            Text(String(vm.puzzle.grid[row][col]))
-                                .font(.system(size: cellSize * 0.42, weight: .semibold, design: .monospaced))
+                        ForEach(0..<gridSize, id: \.self) { col in
+                            let letter = grid.indices.contains(row) && grid[row].indices.contains(col)
+                                ? String(grid[row][col]) : "?"
+                            Text(letter)
+                                .font(.system(size: cellSize * 0.45, weight: .bold, design: .monospaced))
+                                .foregroundColor(cellTextColor(row: row, col: col))
                                 .frame(width: cellSize, height: cellSize)
-                                .foregroundColor(foundColor != nil ? foundColor! : (isHighlighted ? .orange : .primary))
                         }
                     }
                 }
             }
         }
+        .frame(width: totalWidth, height: totalHeight)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
                     let col = Int(value.location.x / cellSize)
                     let row = Int(value.location.y / cellSize)
-                    guard row >= 0, row < 10, col >= 0, col < 10 else { return }
-                    let cell = WordSearchCell(row: row, col: col)
+                    let clampedRow = max(0, min(gridSize - 1, row))
+                    let clampedCol = max(0, min(gridSize - 1, col))
+
                     if dragStart == nil {
-                        dragStart = cell
+                        dragStart = (clampedRow, clampedCol)
                     }
-                    dragCurrent = cell
+                    dragCurrent = (clampedRow, clampedCol)
+                    updateSelectedCells()
                 }
                 .onEnded { _ in
-                    vm.selectedCells = highlightedCells
-                    vm.commitSelection()
+                    checkSelectedWord()
                     dragStart = nil
                     dragCurrent = nil
+                    selectedCells = []
                 }
         )
     }
 
-    func cellsBetween(start: WordSearchCell, end: WordSearchCell) -> Set<WordSearchCell> {
-        var cells = Set<WordSearchCell>()
-        let dr = end.row - start.row
-        let dc = end.col - start.col
-
-        // Only horizontal or vertical
-        if abs(dr) >= abs(dc) {
-            // Vertical
-            let step = dr == 0 ? 0 : (dr > 0 ? 1 : -1)
-            var r = start.row
-            while true {
-                cells.insert(WordSearchCell(row: r, col: start.col))
-                if r == end.row { break }
-                r += step
-            }
-        } else {
-            // Horizontal
-            let step = dc == 0 ? 0 : (dc > 0 ? 1 : -1)
-            var c = start.col
-            while true {
-                cells.insert(WordSearchCell(row: start.row, col: c))
-                if c == end.col { break }
-                c += step
-            }
-        }
-        return cells
-    }
-}
-
-// MARK: - Word List View
-
-struct WordSearchWordListView: View {
-    @ObservedObject var vm: WordSearchViewModel
-
-    var foundWordNames: Set<String> {
-        Set(vm.foundWords.map { $0.word })
-    }
-
-    var body: some View {
-        let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
-        LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(vm.puzzle.words, id: \.self) { word in
-                let isFound = foundWordNames.contains(word)
-                let color = vm.foundWords.first(where: { $0.word == word })?.color ?? .clear
-
-                Text(word)
-                    .font(.caption.bold())
-                    .foregroundColor(isFound ? .white : .primary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 4)
-                    .frame(maxWidth: .infinity)
-                    .background(isFound ? color : Color(.systemGray5))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .strikethrough(isFound, color: .white)
+    var wordListView: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+            ForEach(words, id: \.self) { word in
+                let found = foundWords.contains(word)
+                HStack {
+                    if found {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(wordColors[word] ?? .green)
+                            .font(.system(size: 14))
+                    } else {
+                        Image(systemName: "circle")
+                            .foregroundColor(.white.opacity(0.3))
+                            .font(.system(size: 14))
+                    }
+                    Text(word)
+                        .font(.system(size: 14, weight: found ? .bold : .regular, design: .monospaced))
+                        .foregroundColor(found ? (wordColors[word] ?? .white) : .white.opacity(0.7))
+                        .strikethrough(found)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
-        .padding()
-        .neumorphicCard(radius: 12)
     }
-}
 
-// MARK: - Win Overlay
+    // MARK: - Game Over Screen
 
-struct WordSearchWinOverlay: View {
-    @ObservedObject var vm: WordSearchViewModel
+    var gameOverScreen: some View {
+        VStack(spacing: 28) {
+            Text("Puzzle Complete!")
+                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
 
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.45).ignoresSafeArea()
-            VStack(spacing: 20) {
-                Text("Puzzle Complete!")
-                    .font(.largeTitle.bold())
-                    .foregroundColor(.white)
-                Text("Time: \(vm.formattedTime())")
-                    .font(.title2)
-                    .foregroundColor(.yellow)
-                HStack(spacing: 16) {
-                    ForEach(0..<WordSearchPuzzleSet.puzzles.count, id: \.self) { idx in
-                        Button {
-                            vm.loadPuzzle(index: idx)
-                        } label: {
-                            Text("Puzzle \(idx + 1)")
-                                .font(.headline)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
-                                .background(Color.white)
-                                .foregroundColor(.blue)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
+            // Score card
+            VStack(spacing: 16) {
+                HStack(spacing: 40) {
+                    statView(label: "Time", value: timeString(elapsedTime))
+                    statView(label: "Words", value: "\(foundWords.count)/\(words.count)")
+                    statView(label: "Score", value: "\(score)")
+                }
+
+                Divider()
+                    .background(Color.white.opacity(0.3))
+
+                if roundScores.count > 1 {
+                    VStack(spacing: 4) {
+                        Text("Moving Average (last \(roundScores.count))")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.6))
+                        Text(String(format: "%.0fs", movingAverage))
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                    }
+                }
+
+                // Next difficulty
+                HStack(spacing: 8) {
+                    Text("Next difficulty:")
+                        .foregroundColor(.white.opacity(0.7))
+                    difficultyBadgeView(difficulty: difficulty)
+                }
+
+                // Round history
+                if !roundScores.isEmpty {
+                    VStack(spacing: 6) {
+                        Text("Recent Times")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.6))
+                        HStack(spacing: 8) {
+                            ForEach(roundScores, id: \.self) { s in
+                                Text("\(s)s")
+                                    .font(.caption2)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.white.opacity(0.15))
+                                    .clipShape(Capsule())
+                                    .foregroundColor(.white)
+                            }
                         }
                     }
                 }
             }
-            .padding(32)
-            .background(Color(.systemGray).opacity(0.9))
+            .padding(24)
+            .background(.regularMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 20))
+            .shadow(color: .black.opacity(0.4), radius: 16, x: 0, y: 8)
+            .padding(.horizontal)
+
+            HStack(spacing: 16) {
+                Button(action: resetToStart) {
+                    Text("Menu")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 110, height: 50)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                }
+
+                Button(action: startGame) {
+                    Text("Play Again")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 150, height: 50)
+                        .background(
+                            LinearGradient(
+                                colors: [Color.blue, Color.purple],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                        .shadow(color: .blue.opacity(0.5), radius: 10, x: 0, y: 4)
+                }
+            }
+        }
+        .padding()
+    }
+
+    // MARK: - Helper Views
+
+    func difficultyBadgeView(difficulty: WordSearchDifficulty) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(difficulty.color)
+                .frame(width: 8, height: 8)
+            Text(difficulty.rawValue)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(difficulty.color.opacity(0.25))
+        .overlay(
+            Capsule()
+                .strokeBorder(difficulty.color.opacity(0.6), lineWidth: 1)
+        )
+        .clipShape(Capsule())
+    }
+
+    func statView(label: String, value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.6))
         }
     }
+
+    // MARK: - Game Logic
+
+    func startGame() {
+        stopTimer()
+        gameOver = false
+        gameStarted = true
+        foundWords = []
+        selectedCells = []
+        highlightedCells = [:]
+        wordColors = [:]
+        dragStart = nil
+        dragCurrent = nil
+        elapsedTime = 0
+        score = 0
+
+        gridSize = difficulty.gridSize
+        let count = difficulty.wordCount
+
+        // Pick random word pool and select words
+        let pool = WordSearchPuzzleData.allWordPools.randomElement()!
+        let selected = Array(pool.shuffled().prefix(count))
+
+        let built = WordSearchPuzzleData.buildGrid(words: selected, size: gridSize)
+        grid = built.grid
+        words = built.placed
+
+        // Assign colors
+        let shuffledColors = wordColorPalette.shuffled()
+        for (i, word) in words.enumerated() {
+            wordColors[word] = shuffledColors[i % shuffledColors.count]
+        }
+
+        startTimer()
+    }
+
+    func resetToStart() {
+        stopTimer()
+        gameStarted = false
+        gameOver = false
+    }
+
+    func startTimer() {
+        timerActive = true
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            if timerActive {
+                elapsedTime += 1
+            }
+        }
+    }
+
+    func stopTimer() {
+        timerActive = false
+        timer?.invalidate()
+        timer = nil
+    }
+
+    func timeString(_ seconds: Int) -> String {
+        let m = seconds / 60
+        let s = seconds % 60
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    func cellTextColor(row: Int, col: Int) -> Color {
+        // Check if highlighted by found word
+        for (word, cells) in highlightedCells {
+            if cells.contains(where: { $0.0 == row && $0.1 == col }) {
+                return (wordColors[word] ?? .white)
+            }
+        }
+        // Check if in current selection
+        if selectedCells.contains(where: { $0.0 == row && $0.1 == col }) {
+            return .white
+        }
+        return .white.opacity(0.85)
+    }
+
+    func updateSelectedCells() {
+        guard let start = dragStart, let current = dragCurrent else {
+            selectedCells = []
+            return
+        }
+
+        let rowDiff = current.0 - start.0
+        let colDiff = current.1 - start.1
+
+        var cells: [(Int, Int)] = []
+
+        if rowDiff == 0 {
+            // Horizontal
+            let minCol = min(start.1, current.1)
+            let maxCol = max(start.1, current.1)
+            for c in minCol...maxCol {
+                cells.append((start.0, c))
+            }
+        } else if colDiff == 0 {
+            // Vertical
+            let minRow = min(start.0, current.0)
+            let maxRow = max(start.0, current.0)
+            for r in minRow...maxRow {
+                cells.append((r, start.1))
+            }
+        } else {
+            // Snap to dominant axis
+            if abs(rowDiff) >= abs(colDiff) {
+                // Vertical snap
+                let minRow = min(start.0, current.0)
+                let maxRow = max(start.0, current.0)
+                for r in minRow...maxRow {
+                    cells.append((r, start.1))
+                }
+            } else {
+                // Horizontal snap
+                let minCol = min(start.1, current.1)
+                let maxCol = max(start.1, current.1)
+                for c in minCol...maxCol {
+                    cells.append((start.0, c))
+                }
+            }
+        }
+
+        selectedCells = cells
+    }
+
+    func checkSelectedWord() {
+        guard selectedCells.count >= 2 else { return }
+
+        // Build string from selected cells (forward)
+        let forwardStr = selectedCells.compactMap { (r, c) -> Character? in
+            guard grid.indices.contains(r), grid[r].indices.contains(c) else { return nil }
+            return grid[r][c]
+        }
+        let forward = String(forwardStr)
+        let backward = String(forwardStr.reversed())
+
+        for word in words {
+            if !foundWords.contains(word) && (forward == word || backward == word) {
+                foundWords.insert(word)
+                highlightedCells[word] = selectedCells
+
+                // Check win
+                if foundWords.count == words.count {
+                    handleGameOver()
+                }
+                return
+            }
+        }
+    }
+
+    func handleGameOver() {
+        stopTimer()
+        gameOver = true
+
+        // Compute score: base 1000 minus elapsed time penalty
+        let timePenalty = min(elapsedTime * 2, 800)
+        score = max(200, 1000 - timePenalty + foundWords.count * 50)
+
+        // Append score (time in seconds) and keep last 5
+        roundScores.append(elapsedTime)
+        if roundScores.count > 5 {
+            roundScores = Array(roundScores.suffix(5))
+        }
+
+        // Compute moving average
+        let avg = Double(roundScores.reduce(0, +)) / Double(roundScores.count)
+        movingAverage = avg
+
+        // Adjust difficulty based on moving average
+        adjustDifficulty(averageTime: avg)
+    }
+
+    func adjustDifficulty(averageTime: Double) {
+        // Only adjust after at least 2 rounds
+        guard roundScores.count >= 2 else { return }
+
+        switch difficulty {
+        case .easy:
+            if averageTime < 60 {
+                difficulty = .medium
+            }
+        case .medium:
+            if averageTime < 45 {
+                difficulty = .hard
+            } else if averageTime > 120 {
+                difficulty = .easy
+            }
+        case .hard:
+            if averageTime > 90 {
+                difficulty = .medium
+            }
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    WordSearchView()
 }

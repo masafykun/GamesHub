@@ -1,25 +1,27 @@
 import SwiftUI
 
-enum MmSqPhase {
+enum MemorySeqPhase {
     case start, showing, input, gameOver
 }
 
 struct MemorySeqView: View {
-    @State private var phase: MmSqPhase = .start
+    @State private var phase: MemorySeqPhase = .start
     @State private var sequence: [Int] = []
     @State private var playerIndex: Int = 0
     @State private var lives: Int = 3
-    @State private var flashIndex: Int = -1
-    @State private var score: Int = 0
     @State private var showFlash: Int = -1
+    @State private var score: Int = 0
+    @State private var recentResults: [Bool] = []
+    @State private var flashDuration: Double = 0.6
 
     let colors: [Color] = [.red, .blue, .green, .yellow]
-    let labels: [String] = ["", "", "", ""]
-    let positions: [(String, String)] = [("Top Left", "Top Right"), ("Bottom Left", "Bottom Right")]
+    let colorNames: [String] = ["R", "B", "G", "Y"]
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            LinearGradient(colors: [Color(red: 0.1, green: 0.1, blue: 0.35), Color(red: 0.2, green: 0.05, blue: 0.25)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
 
             switch phase {
             case .start:
@@ -33,103 +35,129 @@ struct MemorySeqView: View {
     }
 
     var startScreen: some View {
-        VStack(spacing: 30) {
+        VStack(spacing: 28) {
             Text("MemorySeq")
-                .font(.largeTitle.bold())
+                .font(.system(size: 36, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
             Text("Watch the sequence,\nthen repeat it!")
                 .multilineTextAlignment(.center)
-                .foregroundColor(.gray)
+                .foregroundColor(.white.opacity(0.7))
+                .padding(.horizontal)
             Button("Start Game") {
                 startGame()
             }
             .font(.title2.bold())
-            .padding(.horizontal, 40)
+            .padding(.horizontal, 44)
             .padding(.vertical, 14)
-            .background(Color.blue)
-            .foregroundColor(.white)
+            .background(.ultraThinMaterial)
             .clipShape(Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.4), lineWidth: 1))
+            .foregroundColor(.white)
         }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding(32)
     }
 
     var gameScreen: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 20) {
             HStack {
-                Text("Seq: \(sequence.count)")
-                    .foregroundColor(.white)
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("SEQ \(sequence.count)")
+                        .font(.caption.bold())
+                        .foregroundColor(.white.opacity(0.6))
+                    Text("Score \(score)")
+                        .font(.headline.bold())
+                        .foregroundColor(.white)
+                }
                 Spacer()
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     ForEach(0..<3, id: \.self) { i in
                         Image(systemName: i < lives ? "heart.fill" : "heart")
-                            .foregroundColor(i < lives ? .red : .gray)
+                            .foregroundColor(i < lives ? .pink : .white.opacity(0.3))
                     }
                 }
                 Spacer()
-                Text("Score: \(score)")
-                    .foregroundColor(.white)
-                    .font(.headline)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(speedLabel)
+                        .font(.caption.bold())
+                        .foregroundColor(.white.opacity(0.6))
+                    Text(phase == .showing ? "Watch" : "Tap!")
+                        .font(.headline.bold())
+                        .foregroundColor(phase == .showing ? .yellow : .green)
+                }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
+            .padding(.horizontal, 16)
 
-            if phase == .showing {
-                Text("Watch...")
-                    .foregroundColor(.yellow)
-                    .font(.subheadline)
-            } else {
-                Text("Your turn!")
-                    .foregroundColor(.green)
-                    .font(.subheadline)
-            }
-
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
                 ForEach(0..<4, id: \.self) { i in
                     colorButton(index: i)
                 }
             }
-            .padding(.horizontal, 32)
+            .padding(.horizontal, 16)
             .disabled(phase == .showing)
         }
     }
 
+    var speedLabel: String {
+        if flashDuration < 0.4 { return "Fast" }
+        if flashDuration < 0.55 { return "Medium" }
+        return "Normal"
+    }
+
     func colorButton(index: Int) -> some View {
         let isFlashing = showFlash == index
-        return RoundedRectangle(cornerRadius: 16)
-            .fill(colors[index].opacity(isFlashing ? 1.0 : 0.4))
-            .frame(height: 130)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(colors[index], lineWidth: isFlashing ? 4 : 1)
-            )
-            .scaleEffect(isFlashing ? 1.06 : 1.0)
-            .animation(.easeInOut(duration: 0.15), value: isFlashing)
-            .onTapGesture {
-                if phase == .input {
-                    handleTap(index)
-                }
-            }
+        return ZStack {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(colors[index].opacity(isFlashing ? 0.85 : 0.25))
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(colors[index].opacity(isFlashing ? 1.0 : 0.5), lineWidth: isFlashing ? 3 : 1.5)
+        }
+        .frame(height: 130)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(isFlashing ? 0.6 : 0.15), lineWidth: 1))
+        .scaleEffect(isFlashing ? 1.07 : 1.0)
+        .shadow(color: isFlashing ? colors[index].opacity(0.6) : .clear, radius: 12)
+        .animation(.easeInOut(duration: 0.15), value: isFlashing)
+        .onTapGesture {
+            if phase == .input { handleTap(index) }
+        }
     }
 
     var gameOverScreen: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 22) {
             Text("Game Over")
-                .font(.largeTitle.bold())
-                .foregroundColor(.red)
+                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .foregroundColor(.pink)
             Text("Score: \(score)")
-                .font(.title2)
+                .font(.title2.bold())
                 .foregroundColor(.white)
-            Text("Sequence length: \(sequence.count)")
-                .foregroundColor(.gray)
+            Text("Length: \(sequence.count)")
+                .foregroundColor(.white.opacity(0.6))
             Button("Play Again") {
                 startGame()
             }
             .font(.title2.bold())
-            .padding(.horizontal, 40)
+            .padding(.horizontal, 44)
             .padding(.vertical, 14)
-            .background(Color.blue)
-            .foregroundColor(.white)
+            .background(.ultraThinMaterial)
             .clipShape(Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.4), lineWidth: 1))
+            .foregroundColor(.white)
         }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding(32)
     }
 
     func startGame() {
@@ -138,6 +166,8 @@ struct MemorySeqView: View {
         lives = 3
         score = 0
         showFlash = -1
+        recentResults = []
+        flashDuration = 0.6
         addStep()
     }
 
@@ -148,15 +178,27 @@ struct MemorySeqView: View {
         showSequence()
     }
 
+    func adaptDifficulty(passed: Bool) {
+        recentResults.append(passed)
+        if recentResults.count > 5 { recentResults.removeFirst() }
+        if recentResults.count == 5 {
+            let trueCount = recentResults.filter { $0 }.count
+            if trueCount > 4 {
+                flashDuration = max(0.3, flashDuration * 0.82)
+            }
+        }
+    }
+
     func showSequence() {
-        var delay = 0.4
-        for (i, btn) in sequence.enumerated() {
+        let step = flashDuration
+        var delay = 0.35
+        for btn in sequence {
             let capturedBtn = btn
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 showFlash = capturedBtn
             }
-            delay += 0.6
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay - 0.15) {
+            delay += step
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay - 0.12) {
                 showFlash = -1
             }
         }
@@ -167,18 +209,20 @@ struct MemorySeqView: View {
 
     func handleTap(_ index: Int) {
         showFlash = index
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
             showFlash = -1
         }
         if index == sequence[playerIndex] {
             playerIndex += 1
             if playerIndex == sequence.count {
                 score += sequence.count
+                adaptDifficulty(passed: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     addStep()
                 }
             }
         } else {
+            adaptDifficulty(passed: false)
             lives -= 1
             if lives <= 0 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {

@@ -1,5 +1,7 @@
 import SwiftUI
 
+// MARK: - Enums & Models
+
 enum SimonColor: Int, CaseIterable {
     case red = 0
     case blue = 1
@@ -15,12 +17,12 @@ enum SimonColor: Int, CaseIterable {
         }
     }
 
-    var dimColor: Color {
+    var brightColor: Color {
         switch self {
-        case .red:    return Color(red: 0.4, green: 0.1, blue: 0.1)
-        case .blue:   return Color(red: 0.1, green: 0.15, blue: 0.4)
-        case .green:  return Color(red: 0.1, green: 0.3, blue: 0.12)
-        case .yellow: return Color(red: 0.4, green: 0.33, blue: 0.04)
+        case .red:    return Color(red: 1.0, green: 0.35, blue: 0.35)
+        case .blue:   return Color(red: 0.35, green: 0.6, blue: 1.0)
+        case .green:  return Color(red: 0.35, green: 1.0, blue: 0.45)
+        case .yellow: return Color(red: 1.0, green: 0.95, blue: 0.3)
         }
     }
 
@@ -32,273 +34,477 @@ enum SimonColor: Int, CaseIterable {
         case .yellow: return "Yellow"
         }
     }
+}
 
-    var brightColor: Color {
+enum SimonPhase {
+    case idle, showing, playerTurn, gameOver
+}
+
+enum SimonDifficulty: String {
+    case easy   = "Easy"
+    case medium = "Medium"
+    case hard   = "Hard"
+
+    var color: Color {
         switch self {
-        case .red:    return Color(red: 1.0, green: 0.35, blue: 0.35)
-        case .blue:   return Color(red: 0.35, green: 0.6, blue: 1.0)
-        case .green:  return Color(red: 0.35, green: 1.0, blue: 0.45)
-        case .yellow: return Color(red: 1.0, green: 0.95, blue: 0.3)
+        case .easy:   return .green
+        case .medium: return .orange
+        case .hard:   return .red
+        }
+    }
+
+    /// Duration (seconds) each button is lit during the sequence playback.
+    var flashDuration: Double {
+        switch self {
+        case .easy:   return 0.7
+        case .medium: return 0.5
+        case .hard:   return 0.35
+        }
+    }
+
+    /// Pause between flashes.
+    var pauseDuration: Double {
+        switch self {
+        case .easy:   return 0.25
+        case .medium: return 0.18
+        case .hard:   return 0.12
         }
     }
 }
 
-enum SimonGamePhase {
-    case idle
-    case showingSequence
-    case playerInput
-    case gameOver
-}
+// MARK: - Main View
 
 struct SimonView: View {
+
+    // MARK: Game state
     @State private var sequence: [SimonColor] = []
     @State private var playerIndex: Int = 0
-    @State private var phase: SimonGamePhase = .idle
-    @State private var activeButton: SimonColor? = nil
+    @State private var phase: SimonPhase = .idle
+    @State private var litButton: SimonColor? = nil
     @State private var score: Int = 0
     @State private var highScore: Int = 0
-    @State private var flashIndex: Int = 0
-    @State private var flashTimer: Timer? = nil
+
+    // MARK: Adaptive difficulty
+    @State private var roundScores: [Int] = []
+    @State private var difficulty: SimonDifficulty = .easy
+
+    // MARK: Animation helpers
+    @State private var showingIndex: Int = 0
+    @State private var wrongFlash: Bool = false
+    @State private var gameOverScale: CGFloat = 0.6
+    @State private var gameOverOpacity: Double = 0
+
+    // MARK: Layout
+    private let buttonSize: CGFloat = 130
 
     var body: some View {
         ZStack {
-            Color(red: 0.12, green: 0.12, blue: 0.18)
-                .ignoresSafeArea()
+            backgroundGradient
+            VStack(spacing: 24) {
+                headerSection
+                scoreSection
+                Spacer(minLength: 8)
+                gridSection
+                Spacer(minLength: 8)
+                statusSection
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 36)
 
-            VStack(spacing: 32) {
-                VStack(spacing: 6) {
-                    Text("Simon Says")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
+            if phase == .gameOver {
+                gameOverOverlay
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Background
+
+    private var backgroundGradient: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.05, green: 0.06, blue: 0.14),
+                Color(red: 0.09, green: 0.10, blue: 0.22)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
+
+    // MARK: - Header
+
+    private var headerSection: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Simon Says")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Adaptive Speed")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            Spacer()
+            difficultyBadge
+        }
+    }
+
+    private var difficultyBadge: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.ultraThinMaterial)
+                .frame(width: 80, height: 34)
+            Text(difficulty.rawValue)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(difficulty.color)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(difficulty.color.opacity(0.4), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Score Section
+
+    private var scoreSection: some View {
+        HStack(spacing: 16) {
+            scoreCard(title: "Round", value: score)
+            scoreCard(title: "Best",  value: highScore)
+            lengthCard
+        }
+    }
+
+    private func scoreCard(title: String, value: Int) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.regularMaterial)
+            VStack(spacing: 4) {
+                Text("\(value)")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text(title)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+            .padding(.vertical, 12)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 76)
+    }
+
+    private var lengthCard: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.regularMaterial)
+            VStack(spacing: 4) {
+                Text("\(sequence.count)")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Length")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+            .padding(.vertical, 12)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 76)
+    }
+
+    // MARK: - Button Grid
+
+    private var gridSection: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                simonButton(.red)
+                simonButton(.blue)
+            }
+            HStack(spacing: 14) {
+                simonButton(.green)
+                simonButton(.yellow)
+            }
+        }
+        .scaleEffect(wrongFlash ? 1.03 : 1.0)
+        .animation(.easeInOut(duration: 0.08), value: wrongFlash)
+    }
+
+    private func simonButton(_ simonColor: SimonColor) -> some View {
+        let isLit = litButton == simonColor
+        return ZStack {
+            RoundedRectangle(cornerRadius: 24)
+                .fill(isLit ? simonColor.brightColor : simonColor.color.opacity(0.55))
+                .shadow(
+                    color: isLit ? simonColor.brightColor.opacity(0.75) : .clear,
+                    radius: isLit ? 22 : 0
+                )
+
+            RoundedRectangle(cornerRadius: 24)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(isLit ? 0.35 : 0.12),
+                            Color.clear
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            Text(simonColor.label)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(isLit ? 1.0 : 0.6))
+        }
+        .frame(width: buttonSize, height: buttonSize)
+        .scaleEffect(isLit ? 1.06 : 1.0)
+        .animation(.easeOut(duration: 0.1), value: isLit)
+        .onTapGesture {
+            handlePlayerTap(simonColor)
+        }
+        .disabled(phase != .playerTurn)
+    }
+
+    // MARK: - Status Section
+
+    private var statusSection: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18)
+                .fill(.ultraThinMaterial)
+                .frame(height: 56)
+
+            if phase == .idle {
+                Button(action: startGame) {
+                    Text("Start Game")
+                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white)
+                }
+            } else if phase == .showing {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(0.85)
+                    Text("Watch the sequence…")
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.85))
+                }
+            } else if phase == .playerTurn {
+                HStack(spacing: 8) {
+                    ForEach(0..<sequence.count, id: \.self) { idx in
+                        Circle()
+                            .fill(idx < playerIndex ? Color.white : Color.white.opacity(0.25))
+                            .frame(width: 8, height: 8)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Game Over Overlay
+
+    private var gameOverOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.55)
+                .ignoresSafeArea()
+                .onTapGesture { /* consume */ }
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 28)
+                    .fill(.regularMaterial)
+                    .shadow(color: .black.opacity(0.5), radius: 30)
+
+                VStack(spacing: 20) {
+                    Text("Game Over")
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
 
-                    HStack(spacing: 24) {
-                        VStack(spacing: 2) {
-                            Text("ROUND")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.5))
-                                .tracking(2)
-                            Text("\(sequence.count)")
-                                .font(.system(size: 28, weight: .bold, design: .rounded))
+                    VStack(spacing: 6) {
+                        Text("Score: \(score)")
+                            .font(.system(size: 20, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                        Text("Best: \(highScore)")
+                            .font(.system(size: 15, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+
+                    movingAverageView
+
+                    Button(action: resetGame) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color(red: 0.35, green: 0.55, blue: 1.0),
+                                                 Color(red: 0.20, green: 0.38, blue: 0.85)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(height: 50)
+                            Text("Play Again")
+                                .font(.system(size: 17, weight: .semibold, design: .rounded))
                                 .foregroundColor(.white)
                         }
-                        Rectangle()
-                            .fill(Color.white.opacity(0.2))
-                            .frame(width: 1, height: 36)
-                        VStack(spacing: 2) {
-                            Text("BEST")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.5))
-                                .tracking(2)
-                            Text("\(highScore)")
-                                .font(.system(size: 28, weight: .bold, design: .rounded))
-                                .foregroundColor(Color(red: 0.95, green: 0.8, blue: 0.1))
-                        }
                     }
+                    .padding(.top, 4)
                 }
-
-                ZStack {
-                    RoundedRectangle(cornerRadius: 28)
-                        .fill(Color(red: 0.08, green: 0.08, blue: 0.14))
-                        .frame(width: 300, height: 300)
-                        .shadow(color: .black.opacity(0.5), radius: 16, x: 0, y: 8)
-
-                    LazyVGrid(columns: [GridItem(.fixed(130)), GridItem(.fixed(130))], spacing: 16) {
-                        ForEach(SimonColor.allCases, id: \.rawValue) { simonColor in
-                            SimonButtonView(
-                                simonColor: simonColor,
-                                isActive: activeButton == simonColor,
-                                isPlayerPhase: phase == .playerInput
-                            ) {
-                                handlePlayerTap(simonColor)
-                            }
-                        }
-                    }
-                    .padding(16)
-
-                    if phase == .showingSequence {
-                        RoundedRectangle(cornerRadius: 28)
-                            .fill(Color.clear)
-                            .frame(width: 300, height: 300)
-                            .contentShape(Rectangle())
-                    }
+                .padding(32)
+            }
+            .frame(width: 300)
+            .scaleEffect(gameOverScale)
+            .opacity(gameOverOpacity)
+            .onAppear {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                    gameOverScale = 1.0
+                    gameOverOpacity = 1.0
                 }
-
-                statusView
-
-                actionButton
-            }
-            .padding(.horizontal, 24)
-        }
-    }
-
-    @ViewBuilder
-    private var statusView: some View {
-        switch phase {
-        case .idle:
-            Text("Tap Start to play")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.white.opacity(0.6))
-        case .showingSequence:
-            Text("Watch the sequence...")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white.opacity(0.8))
-        case .playerInput:
-            Text("Your turn! \(playerIndex) / \(sequence.count)")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(Color(red: 0.2, green: 0.85, blue: 0.5))
-        case .gameOver:
-            VStack(spacing: 4) {
-                Text("Game Over!")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(Color(red: 0.9, green: 0.3, blue: 0.3))
-                Text("You reached round \(sequence.count)")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.white.opacity(0.7))
             }
         }
     }
 
-    @ViewBuilder
-    private var actionButton: some View {
-        if phase == .idle || phase == .gameOver {
-            Button(action: startGame) {
-                Text(phase == .idle ? "Start" : "Play Again")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .frame(width: 180, height: 52)
-                    .background(
-                        LinearGradient(
-                            colors: [Color(red: 0.3, green: 0.5, blue: 1.0), Color(red: 0.2, green: 0.35, blue: 0.85)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .clipShape(Capsule())
-                    .shadow(color: Color(red: 0.2, green: 0.35, blue: 0.85).opacity(0.5), radius: 10, x: 0, y: 5)
+    private var movingAverageView: some View {
+        let avg = movingAverage()
+        return VStack(spacing: 6) {
+            Text("Recent Avg: \(avg > 0 ? String(format: "%.1f", avg) : "—")")
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.7))
+
+            HStack(spacing: 6) {
+                Text("Difficulty:")
+                    .font(.system(size: 13, weight: .regular, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+                Text(difficulty.rawValue)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(difficulty.color)
             }
-        } else {
-            Color.clear.frame(height: 52)
         }
     }
+
+    // MARK: - Game Logic
 
     private func startGame() {
         sequence = []
         playerIndex = 0
         score = 0
-        phase = .idle
-        addToSequence()
+        phase = .showing
+        addStep()
     }
 
-    private func addToSequence() {
+    private func resetGame() {
+        gameOverScale = 0.6
+        gameOverOpacity = 0
+        phase = .idle
+    }
+
+    private func addStep() {
         let next = SimonColor.allCases.randomElement()!
         sequence.append(next)
         playerIndex = 0
-        phase = .showingSequence
-        flashIndex = 0
-        startFlashSequence()
+        playSequence()
     }
 
-    private func startFlashSequence() {
-        flashTimer?.invalidate()
-        flashTimer = nil
-        flashIndex = 0
-        showNextFlash()
+    private func playSequence() {
+        phase = .showing
+        showingIndex = 0
+        litButton = nil
+        scheduleNextFlash()
     }
 
-    private func showNextFlash() {
-        guard flashIndex < sequence.count else {
+    private func scheduleNextFlash() {
+        guard showingIndex < sequence.count else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                activeButton = nil
-                phase = .playerInput
+                litButton = nil
+                phase = .playerTurn
             }
             return
         }
 
-        let color = sequence[flashIndex]
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            activeButton = color
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                activeButton = nil
-                flashIndex += 1
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    showNextFlash()
-                }
+        let color = sequence[showingIndex]
+        let flash = difficulty.flashDuration
+        let pause = difficulty.pauseDuration
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + pause) {
+            litButton = color
+            DispatchQueue.main.asyncAfter(deadline: .now() + flash) {
+                litButton = nil
+                showingIndex += 1
+                scheduleNextFlash()
             }
         }
     }
 
-    private func handlePlayerTap(_ color: SimonColor) {
-        guard phase == .playerInput else { return }
+    private func handlePlayerTap(_ tapped: SimonColor) {
+        guard phase == .playerTurn else { return }
 
-        activeButton = color
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            activeButton = nil
-        }
+        let expected = sequence[playerIndex]
 
-        if color == sequence[playerIndex] {
+        if tapped == expected {
+            // Briefly light the tapped button
+            litButton = tapped
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                litButton = nil
+            }
+
             playerIndex += 1
+
             if playerIndex == sequence.count {
+                // Completed the round
                 score = sequence.count
                 if score > highScore { highScore = score }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    addToSequence()
+                phase = .showing
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+                    addStep()
                 }
             }
         } else {
-            if sequence.count > highScore { highScore = sequence.count }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                phase = .gameOver
-            }
+            // Wrong tap
+            handleGameOver()
         }
     }
-}
 
-struct SimonButtonView: View {
-    let simonColor: SimonColor
-    let isActive: Bool
-    let isPlayerPhase: Bool
-    let onTap: () -> Void
+    private func handleGameOver() {
+        wrongFlash = true
+        litButton = nil
+        phase = .gameOver
 
-    @State private var isPressed: Bool = false
+        // Adaptive difficulty: record score, keep last 5, adjust
+        roundScores.append(score)
+        if roundScores.count > 5 { roundScores.removeFirst() }
+        adjustDifficulty()
 
-    var body: some View {
-        RoundedRectangle(cornerRadius: 20)
-            .fill(isActive || isPressed ? simonColor.color : simonColor.dimColor)
-            .frame(width: 130, height: 130)
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .strokeBorder(
-                        isActive || isPressed
-                            ? simonColor.color.opacity(0.8)
-                            : simonColor.color.opacity(0.2),
-                        lineWidth: 2
-                    )
-            )
-            .shadow(
-                color: isActive || isPressed
-                    ? simonColor.color.opacity(0.7)
-                    : .clear,
-                radius: isActive || isPressed ? 20 : 0,
-                x: 0, y: 0
-            )
-            .scaleEffect(isActive || isPressed ? 0.96 : 1.0)
-            .animation(.easeInOut(duration: 0.1), value: isActive)
-            .animation(.easeInOut(duration: 0.08), value: isPressed)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        guard isPlayerPhase else { return }
-                        if !isPressed {
-                            isPressed = true
-                            onTap()
-                        }
-                    }
-                    .onEnded { _ in
-                        isPressed = false
-                    }
-            )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            wrongFlash = false
+        }
+    }
+
+    // MARK: - Adaptive Difficulty
+
+    private func movingAverage() -> Double {
+        guard !roundScores.isEmpty else { return 0 }
+        let sum = roundScores.reduce(0, +)
+        return Double(sum) / Double(roundScores.count)
+    }
+
+    private func adjustDifficulty() {
+        guard roundScores.count >= 2 else { return }
+        let avg = movingAverage()
+        // Trend: compare latest two halves of the window
+        let half = roundScores.count / 2
+        let recent = roundScores.suffix(max(half, 1))
+        let older  = roundScores.prefix(max(half, 1))
+        let recentAvg = Double(recent.reduce(0, +)) / Double(recent.count)
+        let olderAvg  = Double(older.reduce(0, +))  / Double(older.count)
+        let improving = recentAvg > olderAvg
+
+        if avg >= 10 && improving {
+            difficulty = .hard
+        } else if avg >= 5 && improving {
+            difficulty = .medium
+        } else if avg < 4 {
+            difficulty = .easy
+        }
+        // else keep current difficulty
     }
 }
+
+// MARK: - Preview
 
 #Preview {
     SimonView()

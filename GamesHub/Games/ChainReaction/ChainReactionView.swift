@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Private Model Types
+// MARK: - Private Model Types ()
 
 private enum CRPlayer {
     case none, red, blue
@@ -8,7 +8,15 @@ private enum CRPlayer {
     var color: Color {
         switch self {
         case .none: return .clear
-        case .red:  return .red
+        case .red:  return Color(red: 1.0, green: 0.3, blue: 0.4)
+        case .blue: return Color(red: 0.3, green: 0.6, blue: 1.0)
+        }
+    }
+
+    var glowColor: Color {
+        switch self {
+        case .none: return .clear
+        case .red:  return Color(red: 1.0, green: 0.2, blue: 0.3)
         case .blue: return Color(red: 0.2, green: 0.5, blue: 1.0)
         }
     }
@@ -19,12 +27,12 @@ private struct CRCell {
     var atoms: Int = 0
 
     func criticalMass(row: Int, col: Int, rows: Int, cols: Int) -> Int {
-        var neighbors = 0
-        if row > 0        { neighbors += 1 }
-        if row < rows - 1 { neighbors += 1 }
-        if col > 0        { neighbors += 1 }
-        if col < cols - 1 { neighbors += 1 }
-        return neighbors
+        var n = 0
+        if row > 0        { n += 1 }
+        if row < rows - 1 { n += 1 }
+        if col > 0        { n += 1 }
+        if col < cols - 1 { n += 1 }
+        return n
     }
 }
 
@@ -41,6 +49,7 @@ private class CRGameModel: ObservableObject {
     @Published var winner: CRPlayer = .none
     @Published var isAIThinking: Bool = false
     @Published var moveCount: Int = 0
+    @Published var lastExplosion: (Int, Int)? = nil
 
     func canTap(row: Int, col: Int) -> Bool {
         let cell = grid[row][col]
@@ -73,7 +82,6 @@ private class CRGameModel: ObservableObject {
             grid[r][c].owner == .none || grid[r][c].owner == .blue
         }
 
-        // Prefer cells about to explode (strategic move)
         let explosive = validCells.filter { r, c in
             let mass = grid[r][c].criticalMass(row: r, col: c,
                                                 rows: CRGameModel.rows, cols: CRGameModel.cols)
@@ -101,9 +109,7 @@ private class CRGameModel: ObservableObject {
     private func allCells() -> [(Int, Int)] {
         var result: [(Int, Int)] = []
         for r in 0..<CRGameModel.rows {
-            for c in 0..<CRGameModel.cols {
-                result.append((r, c))
-            }
+            for c in 0..<CRGameModel.cols { result.append((r, c)) }
         }
         return result
     }
@@ -123,9 +129,7 @@ private class CRGameModel: ObservableObject {
                         let explodingOwner = newGrid[r][c].owner
                         newGrid[r][c].atoms -= mass
                         if newGrid[r][c].atoms == 0 { newGrid[r][c].owner = .none }
-
-                        let neighbors = getNeighbors(row: r, col: c)
-                        for (nr, nc) in neighbors {
+                        for (nr, nc) in getNeighbors(row: r, col: c) {
                             newGrid[nr][nc].owner = explodingOwner
                             newGrid[nr][nc].atoms += 1
                         }
@@ -148,17 +152,10 @@ private class CRGameModel: ObservableObject {
 
     private func checkWinner() {
         guard moveCount >= 2 else { return }
-
-        let redCells = allCells().filter { r, c in grid[r][c].owner == .red }
-        let blueCells = allCells().filter { r, c in grid[r][c].owner == .blue }
-
-        if redCells.isEmpty && moveCount > 1 {
-            gameOver = true
-            winner = .blue
-        } else if blueCells.isEmpty && moveCount > 1 {
-            gameOver = true
-            winner = .red
-        }
+        let redCells  = allCells().filter { r, c in grid[r][c].owner == .red  }.count
+        let blueCells = allCells().filter { r, c in grid[r][c].owner == .blue }.count
+        if redCells == 0  { gameOver = true; winner = .blue }
+        else if blueCells == 0 { gameOver = true; winner = .red  }
     }
 
     func reset() {
@@ -169,33 +166,47 @@ private class CRGameModel: ObservableObject {
         winner = .none
         isAIThinking = false
         moveCount = 0
+        lastExplosion = nil
     }
 }
 
-// MARK: - Main View
+// MARK: - Main View (Glassmorphism)
 
 struct ChainReactionView: View {
     @StateObject private var model = CRGameModel()
 
+    private let backgroundGradient = LinearGradient(
+        colors: [
+            Color(red: 0.05, green: 0.05, blue: 0.18),
+            Color(red: 0.10, green: 0.06, blue: 0.25),
+            Color(red: 0.08, green: 0.12, blue: 0.22)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+            backgroundGradient.ignoresSafeArea()
 
-            VStack(spacing: 20) {
-                headerView
-                gridView
-                statusView
-                resetButton
+            // Ambient blobs
+            ambientBlobs
+
+            ScrollView {
+                VStack(spacing: 24) {
+                    headerGlass
+                    gridGlass
+                    scoreGlass
+                    resetGlass
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 24)
             }
-            .padding()
 
             if model.gameOver {
                 gameOverOverlay
             }
         }
-        .onReceive(
-            NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
-        ) { _ in }
         .onChange(of: model.isAIThinking) { _, thinking in
             if thinking {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -205,45 +216,80 @@ struct ChainReactionView: View {
         }
     }
 
+    // MARK: Ambient blobs
+
+    private var ambientBlobs: some View {
+        ZStack {
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color(red: 0.5, green: 0.2, blue: 1.0).opacity(0.35), .clear],
+                        center: .center, startRadius: 0, endRadius: 200
+                    )
+                )
+                .frame(width: 400, height: 400)
+                .offset(x: -120, y: -250)
+                .blur(radius: 40)
+
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color(red: 0.2, green: 0.4, blue: 1.0).opacity(0.3), .clear],
+                        center: .center, startRadius: 0, endRadius: 200
+                    )
+                )
+                .frame(width: 350, height: 350)
+                .offset(x: 130, y: 300)
+                .blur(radius: 40)
+        }
+    }
+
     // MARK: Header
 
-    private var headerView: some View {
+    private var headerGlass: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Chain Reaction")
                     .font(.title2.bold())
-                Text("6 × 6 Grid")
+                    .foregroundColor(.white)
+                Text("Strategy · 6×6")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.white.opacity(0.6))
             }
             Spacer()
-            playerIndicator
+            turnBadge
         }
+        .padding(18)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(.white.opacity(0.15), lineWidth: 1)
+        )
+        .shadow(color: model.currentPlayer.glowColor.opacity(0.35), radius: 20, x: 0, y: 4)
     }
 
-    private var playerIndicator: some View {
+    private var turnBadge: some View {
         HStack(spacing: 8) {
             Circle()
                 .fill(model.currentPlayer.color)
-                .frame(width: 14, height: 14)
-                .overlay(
-                    Circle()
-                        .stroke(Color.primary.opacity(0.3), lineWidth: 1)
-                )
-            Text(model.currentPlayer == .red ? "Your Turn" : "AI Thinking…")
-                .font(.subheadline.weight(.medium))
+                .frame(width: 12, height: 12)
+                .shadow(color: model.currentPlayer.glowColor.opacity(0.9), radius: 6)
+            Text(model.currentPlayer == .red ? "Your Turn" : "AI…")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.white)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.regularMaterial, in: Capsule())
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.2), lineWidth: 1))
     }
 
     // MARK: Grid
 
-    private var gridView: some View {
+    private var gridGlass: some View {
         GeometryReader { geo in
-            let side = min(geo.size.width, geo.size.height)
-            let cellSize = (side - 10) / CGFloat(CRGameModel.cols)
+            let side = geo.size.width
+            let cellSize = (side - 12) / CGFloat(CRGameModel.cols)
 
             VStack(spacing: 2) {
                 ForEach(0..<CRGameModel.rows, id: \.self) { row in
@@ -264,24 +310,29 @@ struct ChainReactionView: View {
                     }
                 }
             }
+            .padding(6)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(.white.opacity(0.12), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 8)
             .frame(width: side, height: side)
         }
         .aspectRatio(1, contentMode: .fit)
     }
 
-    // MARK: Status
+    // MARK: Score
 
-    private var statusView: some View {
-        HStack(spacing: 20) {
-            playerScoreTag(player: .red, label: "You")
-            Spacer()
-            playerScoreTag(player: .blue, label: "AI")
+    private var scoreGlass: some View {
+        HStack(spacing: 12) {
+            scoreCard(player: .red, label: "You")
+            scoreCard(player: .blue, label: "AI")
         }
-        .padding(.horizontal, 8)
     }
 
-    private func playerScoreTag(player: CRPlayer, label: String) -> some View {
-        let count = (0..<CRGameModel.rows).flatMap { r in
+    private func scoreCard(player: CRPlayer, label: String) -> some View {
+        let cells = (0..<CRGameModel.rows).flatMap { r in
             (0..<CRGameModel.cols).filter { c in model.grid[r][c].owner == player }
         }.count
         let atoms = (0..<CRGameModel.rows).flatMap { r in
@@ -290,29 +341,51 @@ struct ChainReactionView: View {
             }
         }.reduce(0, +)
 
-        return HStack(spacing: 6) {
-            Circle()
-                .fill(player.color)
-                .frame(width: 10, height: 10)
-            Text(label)
-                .font(.subheadline.bold())
-                .foregroundColor(player.color)
-            Text("· \(count) cells · \(atoms) atoms")
+        return VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(player.color)
+                    .frame(width: 10, height: 10)
+                    .shadow(color: player.glowColor.opacity(0.8), radius: 4)
+                Text(label)
+                    .font(.subheadline.bold())
+                    .foregroundColor(.white)
+            }
+            Text("\(cells) cells")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundColor(.white.opacity(0.6))
+            Text("\(atoms) atoms")
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.4))
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(player.color.opacity(0.3), lineWidth: 1)
+        )
+        .shadow(color: player.glowColor.opacity(0.2), radius: 10)
     }
 
     // MARK: Reset
 
-    private var resetButton: some View {
+    private var resetGlass: some View {
         Button(action: model.reset) {
-            Label("New Game", systemImage: "arrow.counterclockwise")
-                .font(.subheadline.weight(.medium))
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .background(Color.accentColor.opacity(0.15), in: Capsule())
-                .foregroundColor(.accentColor)
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.counterclockwise")
+                Text("New Game")
+                    .fontWeight(.semibold)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(.white.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(color: .white.opacity(0.05), radius: 8)
         }
     }
 
@@ -320,37 +393,48 @@ struct ChainReactionView: View {
 
     private var gameOverOverlay: some View {
         ZStack {
-            Color.black.opacity(0.45).ignoresSafeArea()
+            Color.black.opacity(0.6).ignoresSafeArea()
+                .background(.ultraThinMaterial)
 
-            VStack(spacing: 18) {
-                Text(model.winner == .red ? "You Win!" : "AI Wins!")
-                    .font(.largeTitle.bold())
+            VStack(spacing: 20) {
+                Text(model.winner == .red ? "Victory!" : "Defeat!")
+                    .font(.system(size: 42, weight: .black))
                     .foregroundColor(model.winner.color)
+                    .shadow(color: model.winner.glowColor.opacity(0.8), radius: 20)
 
                 Text(model.winner == .red
-                     ? "Congratulations, you dominated the grid."
-                     : "The AI captured all cells. Try again!")
+                     ? "You dominated the grid!"
+                     : "The AI captured everything.")
                     .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.75))
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
 
                 Button(action: model.reset) {
                     Text("Play Again")
                         .font(.headline)
                         .foregroundColor(.white)
-                        .padding(.horizontal, 32)
-                        .padding(.vertical, 14)
-                        .background(model.winner.color, in: Capsule())
+                        .padding(.horizontal, 36)
+                        .padding(.vertical, 15)
+                        .background(
+                            model.winner.color.opacity(0.8),
+                            in: Capsule()
+                        )
+                        .shadow(color: model.winner.glowColor.opacity(0.6), radius: 14)
                 }
             }
-            .padding(32)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .padding(36)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28))
+            .overlay(
+                RoundedRectangle(cornerRadius: 28)
+                    .stroke(.white.opacity(0.15), lineWidth: 1)
+            )
+            .shadow(color: model.winner.glowColor.opacity(0.4), radius: 30)
             .padding(40)
         }
     }
 }
 
-// MARK: - Cell View
+// MARK: - Cell View ()
 
 private struct CRCellView: View {
     let cell: CRCell
@@ -364,64 +448,74 @@ private struct CRCellView: View {
         cell.criticalMass(row: row, col: col, rows: rows, cols: cols)
     }
 
-    private var fillColor: Color {
-        switch cell.owner {
-        case .none: return Color(.secondarySystemBackground)
-        case .red:  return Color.red.opacity(0.15)
-        case .blue: return Color(red: 0.2, green: 0.5, blue: 1.0).opacity(0.15)
-        }
+    private var isNearCritical: Bool {
+        cell.atoms == criticalMass - 1 && cell.owner != .none
     }
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(fillColor)
+            // Base glass cell
+            RoundedRectangle(cornerRadius: 10)
+                .fill(.ultraThinMaterial)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(cell.owner == .none
-                                ? Color.gray.opacity(0.3)
-                                : cell.owner.color.opacity(0.6),
-                                lineWidth: cell.atoms == criticalMass - 1 ? 2 : 1)
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(cell.owner.color.opacity(cell.owner == .none ? 0 : 0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(
+                            cell.owner == .none
+                                ? Color.white.opacity(0.08)
+                                : cell.owner.color.opacity(isNearCritical ? 0.9 : 0.4),
+                            lineWidth: isNearCritical ? 2 : 1
+                        )
+                )
+                .shadow(
+                    color: isNearCritical ? cell.owner.glowColor.opacity(0.6) : .clear,
+                    radius: 8
                 )
 
-            atomDots(count: cell.atoms, color: cell.owner.color, size: cellSize)
+            crAtomDots(count: cell.atoms, color: cell.owner.color,
+                         glow: cell.owner.glowColor, size: cellSize)
         }
         .frame(width: cellSize, height: cellSize)
-        .animation(.easeInOut(duration: 0.15), value: cell.atoms)
+        .animation(.easeInOut(duration: 0.18), value: cell.atoms)
     }
 }
 
-private func atomDots(count: Int, color: Color, size: CGFloat) -> some View {
-    let dotSize = max(size * 0.18, 6)
-    let spacing = dotSize * 0.6
+private func crAtomDots(count: Int, color: Color, glow: Color, size: CGFloat) -> some View {
+    let dotSize = max(size * 0.19, 6)
+    let spacing = dotSize * 0.55
+
+    func dot() -> some View {
+        Circle()
+            .fill(
+                RadialGradient(
+                    colors: [color, color.opacity(0.6)],
+                    center: .topLeading,
+                    startRadius: 0,
+                    endRadius: dotSize
+                )
+            )
+            .frame(width: dotSize, height: dotSize)
+            .shadow(color: glow.opacity(0.85), radius: 5)
+    }
 
     return Group {
         switch count {
         case 1:
-            Circle().fill(color).frame(width: dotSize, height: dotSize)
+            dot()
         case 2:
-            HStack(spacing: spacing) {
-                Circle().fill(color).frame(width: dotSize, height: dotSize)
-                Circle().fill(color).frame(width: dotSize, height: dotSize)
-            }
+            HStack(spacing: spacing) { dot(); dot() }
         case 3:
             VStack(spacing: spacing * 0.5) {
-                Circle().fill(color).frame(width: dotSize, height: dotSize)
-                HStack(spacing: spacing) {
-                    Circle().fill(color).frame(width: dotSize, height: dotSize)
-                    Circle().fill(color).frame(width: dotSize, height: dotSize)
-                }
+                dot()
+                HStack(spacing: spacing) { dot(); dot() }
             }
         case let n where n >= 4:
             VStack(spacing: spacing * 0.5) {
-                HStack(spacing: spacing) {
-                    Circle().fill(color).frame(width: dotSize, height: dotSize)
-                    Circle().fill(color).frame(width: dotSize, height: dotSize)
-                }
-                HStack(spacing: spacing) {
-                    Circle().fill(color).frame(width: dotSize, height: dotSize)
-                    Circle().fill(color).frame(width: dotSize, height: dotSize)
-                }
+                HStack(spacing: spacing) { dot(); dot() }
+                HStack(spacing: spacing) { dot(); dot() }
             }
         default:
             EmptyView()

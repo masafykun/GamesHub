@@ -2,16 +2,17 @@ import SwiftUI
 
 // MARK: - Models
 
-enum CodeBreakerColor: CaseIterable, Equatable {
-    case red, blue, green, yellow, purple
+enum CodeBreakerColor: CaseIterable {
+    case red, blue, green, yellow, purple, orange
 
     var color: Color {
         switch self {
-        case .red:    return Color(red: 0.92, green: 0.25, blue: 0.25)
-        case .blue:   return Color(red: 0.22, green: 0.51, blue: 0.94)
-        case .green:  return Color(red: 0.20, green: 0.78, blue: 0.35)
-        case .yellow: return Color(red: 0.98, green: 0.82, blue: 0.12)
-        case .purple: return Color(red: 0.67, green: 0.28, blue: 0.92)
+        case .red:    return .red
+        case .blue:   return .blue
+        case .green:  return .green
+        case .yellow: return Color.yellow
+        case .purple: return .purple
+        case .orange: return .orange
         }
     }
 
@@ -22,642 +23,749 @@ enum CodeBreakerColor: CaseIterable, Equatable {
         case .green:  return "Green"
         case .yellow: return "Yellow"
         case .purple: return "Purple"
+        case .orange: return "Orange"
         }
     }
 }
 
-struct CodeBreakerGuessRow: Identifiable {
-    let id = UUID()
-    let guess: [CodeBreakerColor]
-    let blackPegs: Int
-    let whitePegs: Int
+enum CodeBreakerDifficulty {
+    case easy    // 3-color code, 5 colors palette
+    case medium  // 4-color code, 5 colors palette
+    case hard    // 5-color code, 6 colors palette (all colors)
+
+    var codeLength: Int {
+        switch self {
+        case .easy:   return 3
+        case .medium: return 4
+        case .hard:   return 5
+        }
+    }
+
+    var paletteCount: Int {
+        switch self {
+        case .easy:   return 5
+        case .medium: return 5
+        case .hard:   return 6
+        }
+    }
+
+    var maxAttempts: Int { return 8 }
+
+    var label: String {
+        switch self {
+        case .easy:   return "Easy"
+        case .medium: return "Medium"
+        case .hard:   return "Hard"
+        }
+    }
+
+    var badgeColor: Color {
+        switch self {
+        case .easy:   return .green
+        case .medium: return .orange
+        case .hard:   return .red
+        }
+    }
 }
 
-enum CodeBreakerGamePhase {
-    case playing, won, lost
+struct CodeBreakerGuess {
+    let colors: [CodeBreakerColor]
+    let blacks: Int
+    let whites: Int
 }
 
-// MARK: - Game State
-
-class CodeBreakerGameState: ObservableObject {
-    static let codeLength = 4
-    static let maxAttempts = 8
-
-    @Published var secretCode: [CodeBreakerColor] = []
-    @Published var currentGuess: [CodeBreakerColor?] = Array(repeating: nil, count: 4)
-    @Published var selectedSlot: Int = 0
-    @Published var history: [CodeBreakerGuessRow] = []
-    @Published var phase: CodeBreakerGamePhase = .playing
-    @Published var showSecret: Bool = false
-
-    init() {
-        startGame()
-    }
-
-    func startGame() {
-        secretCode = (0..<CodeBreakerGameState.codeLength).map { _ in
-            CodeBreakerColor.allCases.randomElement()!
-        }
-        currentGuess = Array(repeating: nil, count: CodeBreakerGameState.codeLength)
-        selectedSlot = 0
-        history = []
-        phase = .playing
-        showSecret = false
-    }
-
-    func selectSlot(_ index: Int) {
-        guard phase == .playing else { return }
-        selectedSlot = index
-    }
-
-    func placeColor(_ color: CodeBreakerColor) {
-        guard phase == .playing else { return }
-        currentGuess[selectedSlot] = color
-        // Advance to next empty slot or next slot
-        if selectedSlot < CodeBreakerGameState.codeLength - 1 {
-            selectedSlot += 1
-        }
-    }
-
-    func clearSlot() {
-        guard phase == .playing else { return }
-        currentGuess[selectedSlot] = nil
-    }
-
-    var canSubmit: Bool {
-        currentGuess.allSatisfy { $0 != nil }
-    }
-
-    func submitGuess() {
-        guard canSubmit, phase == .playing else { return }
-        let guess = currentGuess.compactMap { $0 }
-        let (black, white) = evaluate(guess: guess, secret: secretCode)
-        let row = CodeBreakerGuessRow(guess: guess, blackPegs: black, whitePegs: white)
-        history.append(row)
-
-        if black == CodeBreakerGameState.codeLength {
-            phase = .won
-            showSecret = true
-        } else if history.count >= CodeBreakerGameState.maxAttempts {
-            phase = .lost
-            showSecret = true
-        } else {
-            currentGuess = Array(repeating: nil, count: CodeBreakerGameState.codeLength)
-            selectedSlot = 0
-        }
-    }
-
-    private func evaluate(guess: [CodeBreakerColor], secret: [CodeBreakerColor]) -> (Int, Int) {
-        var black = 0
-        var white = 0
-        var secretRemaining: [CodeBreakerColor] = []
-        var guessRemaining: [CodeBreakerColor] = []
-
-        for i in 0..<CodeBreakerGameState.codeLength {
-            if guess[i] == secret[i] {
-                black += 1
-            } else {
-                secretRemaining.append(secret[i])
-                guessRemaining.append(guess[i])
-            }
-        }
-
-        for color in guessRemaining {
-            if let idx = secretRemaining.firstIndex(of: color) {
-                white += 1
-                secretRemaining.remove(at: idx)
-            }
-        }
-
-        return (black, white)
-    }
+enum CodeBreakerGameState {
+    case playing
+    case won
+    case lost
 }
 
 // MARK: - Main View
 
 struct CodeBreakerView: View {
-    @StateObject private var gameState = CodeBreakerGameState()
+    // Adaptive difficulty
+    @State var roundScores: [Int] = []
+    @State private var difficulty: CodeBreakerDifficulty = .medium
 
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                Color(red: 0.12, green: 0.12, blue: 0.18).ignoresSafeArea()
+    // Game state
+    @State private var secretCode: [CodeBreakerColor] = []
+    @State private var currentGuess: [CodeBreakerColor?] = []
+    @State private var guessHistory: [CodeBreakerGuess] = []
+    @State private var gameState: CodeBreakerGameState = .playing
+    @State private var selectedSlot: Int = 0
+    @State private var showSecret: Bool = false
+    @State private var animateWin: Bool = false
 
-                VStack(spacing: 0) {
-                    CodeBreakerHeaderView(
-                        attemptsLeft: CodeBreakerGameState.maxAttempts - gameState.history.count,
-                        phase: gameState.phase
-                    )
-
-                    ScrollViewReader { proxy in
-                        ScrollView(.vertical, showsIndicators: false) {
-                            VStack(spacing: 8) {
-                                // History rows (oldest first)
-                                ForEach(Array(gameState.history.enumerated()), id: \.element.id) { index, row in
-                                    CodeBreakerHistoryRowView(
-                                        attemptNumber: index + 1,
-                                        row: row
-                                    )
-                                    .id(row.id)
-                                }
-
-                                // Current input row (only if playing)
-                                if gameState.phase == .playing {
-                                    CodeBreakerInputRowView(
-                                        guess: gameState.currentGuess,
-                                        selectedSlot: gameState.selectedSlot,
-                                        attemptNumber: gameState.history.count + 1,
-                                        onSelectSlot: { gameState.selectSlot($0) }
-                                    )
-                                    .id("inputRow")
-                                }
-
-                                // Empty placeholder rows
-                                let emptyRows = CodeBreakerGameState.maxAttempts
-                                    - gameState.history.count
-                                    - (gameState.phase == .playing ? 1 : 0)
-                                ForEach(0..<max(0, emptyRows), id: \.self) { i in
-                                    CodeBreakerEmptyRowView(
-                                        attemptNumber: gameState.history.count
-                                            + (gameState.phase == .playing ? 2 : 1) + i
-                                    )
-                                }
-
-                                Spacer(minLength: 16)
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.top, 8)
-                        }
-                        .onChange(of: gameState.history.count) {
-                            withAnimation {
-                                proxy.scrollTo("inputRow", anchor: .bottom)
-                            }
-                        }
-                    }
-
-                    // Secret code row (shown at end)
-                    if gameState.showSecret {
-                        CodeBreakerSecretRevealView(secret: gameState.secretCode)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                    }
-
-                    // Color picker palette
-                    if gameState.phase == .playing {
-                        CodeBreakerPaletteView(
-                            onSelectColor: { gameState.placeColor($0) },
-                            onClear: { gameState.clearSlot() },
-                            onSubmit: { gameState.submitGuess() },
-                            canSubmit: gameState.canSubmit
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, geo.safeAreaInsets.bottom > 0 ? 8 : 16)
-                    }
-
-                    // Game over controls
-                    if gameState.phase != .playing {
-                        CodeBreakerEndView(
-                            phase: gameState.phase,
-                            onRestart: { gameState.startGame() }
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, geo.safeAreaInsets.bottom > 0 ? 8 : 16)
-                    }
-                }
-            }
-        }
+    private var palette: [CodeBreakerColor] {
+        Array(CodeBreakerColor.allCases.prefix(difficulty.paletteCount))
     }
-}
 
-// MARK: - Header
+    private var codeLength: Int { difficulty.codeLength }
 
-struct CodeBreakerHeaderView: View {
-    let attemptsLeft: Int
-    let phase: CodeBreakerGamePhase
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("CODE BREAKER")
-                    .font(.system(size: 20, weight: .black, design: .monospaced))
-                    .foregroundColor(.white)
-                Text("Crack the 4-color secret code")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(Color.white.opacity(0.5))
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("\(attemptsLeft)")
-                    .font(.system(size: 28, weight: .black, design: .monospaced))
-                    .foregroundColor(attemptsLeft <= 2 ? Color(red: 0.92, green: 0.25, blue: 0.25) : .white)
-                Text("left")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(Color.white.opacity(0.5))
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(Color(red: 0.16, green: 0.16, blue: 0.22))
-    }
-}
-
-// MARK: - Peg Row (black/white feedback)
-
-struct CodeBreakerPegFeedbackView: View {
-    let blackPegs: Int
-    let whitePegs: Int
-
-    var body: some View {
-        VStack(spacing: 3) {
-            ForEach(0..<2, id: \.self) { row in
-                HStack(spacing: 3) {
-                    ForEach(0..<2, id: \.self) { col in
-                        let pegIndex = row * 2 + col
-                        let isBlack = pegIndex < blackPegs
-                        let isWhite = pegIndex < (blackPegs + whitePegs)
-                        Circle()
-                            .fill(
-                                isBlack ? Color.black :
-                                isWhite ? Color.white :
-                                Color.white.opacity(0.15)
-                            )
-                            .frame(width: 10, height: 10)
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.white.opacity(0.3), lineWidth: 0.5)
-                            )
-                    }
-                }
-            }
-        }
-        .frame(width: 30, height: 30)
-    }
-}
-
-// MARK: - Color Circle
-
-struct CodeBreakerColorCircle: View {
-    let color: CodeBreakerColor?
-    let size: CGFloat
-    let isSelected: Bool
+    // MARK: - Body
 
     var body: some View {
         ZStack {
-            Circle()
-                .fill(color?.color ?? Color.white.opacity(0.08))
-                .frame(width: size, height: size)
-                .shadow(color: color?.color.opacity(0.5) ?? .clear, radius: isSelected ? 8 : 4)
-
-            if color == nil {
-                Circle()
-                    .stroke(
-                        isSelected ? Color.white.opacity(0.9) : Color.white.opacity(0.25),
-                        style: StrokeStyle(lineWidth: isSelected ? 2.5 : 1.5, dash: isSelected ? [] : [4, 3])
-                    )
-                    .frame(width: size, height: size)
-            }
-        }
-        .overlay(
-            Circle()
-                .stroke(
-                    isSelected ? Color.white : Color.clear,
-                    lineWidth: 3
-                )
-                .frame(width: size + 6, height: size + 6)
-        )
-        .animation(.easeInOut(duration: 0.15), value: isSelected)
-    }
-}
-
-// MARK: - History Row
-
-struct CodeBreakerHistoryRowView: View {
-    let attemptNumber: Int
-    let row: CodeBreakerGuessRow
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text("\(attemptNumber)")
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundColor(Color.white.opacity(0.4))
-                .frame(width: 20)
-
-            HStack(spacing: 10) {
-                ForEach(0..<row.guess.count, id: \.self) { i in
-                    CodeBreakerColorCircle(
-                        color: row.guess[i],
-                        size: 36,
-                        isSelected: false
-                    )
-                }
-            }
-
-            Spacer()
-
-            CodeBreakerPegFeedbackView(
-                blackPegs: row.blackPegs,
-                whitePegs: row.whitePegs
+            // Background gradient
+            LinearGradient(
+                colors: [Color(red: 0.05, green: 0.05, blue: 0.2),
+                         Color(red: 0.1, green: 0.05, blue: 0.25),
+                         Color(red: 0.05, green: 0.1, blue: 0.3)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
+            .ignoresSafeArea()
 
-            // Feedback label
-            VStack(alignment: .trailing, spacing: 1) {
-                HStack(spacing: 3) {
-                    Circle().fill(Color.black).frame(width: 7, height: 7)
-                        .overlay(Circle().stroke(Color.white.opacity(0.4), lineWidth: 0.5))
-                    Text("\(row.blackPegs)")
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-                }
-                HStack(spacing: 3) {
-                    Circle().fill(Color.white).frame(width: 7, height: 7)
-                    Text("\(row.whitePegs)")
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color.white.opacity(0.7))
+            // Decorative blobs
+            decorativeBlobs
+
+            VStack(spacing: 0) {
+                headerBar
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+
+                ScrollView {
+                    VStack(spacing: 12) {
+                        secretCodeRow
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+
+                        historySection
+                            .padding(.horizontal, 16)
+
+                        currentGuessSection
+                            .padding(.horizontal, 16)
+
+                        colorPalette
+                            .padding(.horizontal, 16)
+
+                        actionButtons
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 24)
+                    }
                 }
             }
-            .frame(width: 36)
+
+            // Game over overlay
+            if gameState != .playing {
+                gameOverOverlay
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(red: 0.18, green: 0.18, blue: 0.24))
-        )
+        .onAppear { startNewGame() }
     }
-}
 
-// MARK: - Input Row
+    // MARK: - Subviews
 
-struct CodeBreakerInputRowView: View {
-    let guess: [CodeBreakerColor?]
-    let selectedSlot: Int
-    let attemptNumber: Int
-    let onSelectSlot: (Int) -> Void
+    private var decorativeBlobs: some View {
+        ZStack {
+            Circle()
+                .fill(Color.purple.opacity(0.15))
+                .frame(width: 300, height: 300)
+                .blur(radius: 60)
+                .offset(x: -100, y: -200)
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Text("\(attemptNumber)")
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundColor(Color.white.opacity(0.8))
-                .frame(width: 20)
+            Circle()
+                .fill(Color.blue.opacity(0.12))
+                .frame(width: 250, height: 250)
+                .blur(radius: 50)
+                .offset(x: 120, y: 100)
 
-            HStack(spacing: 10) {
-                ForEach(0..<guess.count, id: \.self) { i in
-                    CodeBreakerColorCircle(
-                        color: guess[i],
-                        size: 36,
-                        isSelected: selectedSlot == i
-                    )
-                    .onTapGesture {
-                        onSelectSlot(i)
-                    }
-                }
-            }
-
-            Spacer()
-
-            // Empty peg area placeholder
-            VStack(spacing: 3) {
-                ForEach(0..<2, id: \.self) { _ in
-                    HStack(spacing: 3) {
-                        ForEach(0..<2, id: \.self) { _ in
-                            Circle()
-                                .fill(Color.white.opacity(0.08))
-                                .frame(width: 10, height: 10)
-                        }
-                    }
-                }
-            }
-            .frame(width: 30, height: 30)
-
-            Text("?")
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundColor(Color.white.opacity(0.3))
-                .frame(width: 36)
+            Circle()
+                .fill(Color.pink.opacity(0.1))
+                .frame(width: 200, height: 200)
+                .blur(radius: 40)
+                .offset(x: 60, y: 300)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(red: 0.20, green: 0.22, blue: 0.32))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color(red: 0.40, green: 0.50, blue: 0.90).opacity(0.6), lineWidth: 1.5)
-                )
-        )
     }
-}
 
-// MARK: - Empty Row
-
-struct CodeBreakerEmptyRowView: View {
-    let attemptNumber: Int
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text("\(attemptNumber)")
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundColor(Color.white.opacity(0.2))
-                .frame(width: 20)
-
-            HStack(spacing: 10) {
-                ForEach(0..<4, id: \.self) { _ in
-                    Circle()
-                        .fill(Color.white.opacity(0.05))
-                        .frame(width: 36, height: 36)
-                        .overlay(
-                            Circle().stroke(Color.white.opacity(0.10), lineWidth: 1)
-                        )
-                }
-            }
-
-            Spacer()
-
-            VStack(spacing: 3) {
-                ForEach(0..<2, id: \.self) { _ in
-                    HStack(spacing: 3) {
-                        ForEach(0..<2, id: \.self) { _ in
-                            Circle()
-                                .fill(Color.white.opacity(0.05))
-                                .frame(width: 10, height: 10)
-                        }
-                    }
-                }
-            }
-            .frame(width: 30, height: 30)
-
-            Spacer().frame(width: 36)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(red: 0.15, green: 0.15, blue: 0.20))
-        )
-        .opacity(0.5)
-    }
-}
-
-// MARK: - Secret Reveal
-
-struct CodeBreakerSecretRevealView: View {
-    let secret: [CodeBreakerColor]
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text("SECRET")
-                .font(.system(size: 11, weight: .black, design: .monospaced))
-                .foregroundColor(Color.white.opacity(0.6))
-                .frame(width: 55)
-
-            HStack(spacing: 10) {
-                ForEach(0..<secret.count, id: \.self) { i in
-                    Circle()
-                        .fill(secret[i].color)
-                        .frame(width: 36, height: 36)
-                        .shadow(color: secret[i].color.opacity(0.6), radius: 6)
-                }
-            }
-
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(red: 0.22, green: 0.18, blue: 0.10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color(red: 0.90, green: 0.70, blue: 0.20).opacity(0.6), lineWidth: 1.5)
-                )
-        )
-    }
-}
-
-// MARK: - Palette (color picker + submit)
-
-struct CodeBreakerPaletteView: View {
-    let onSelectColor: (CodeBreakerColor) -> Void
-    let onClear: () -> Void
-    let onSubmit: () -> Void
-    let canSubmit: Bool
-
-    var body: some View {
-        VStack(spacing: 10) {
-            // Color buttons
-            HStack(spacing: 10) {
-                ForEach(CodeBreakerColor.allCases, id: \.self) { color in
-                    Button {
-                        onSelectColor(color)
-                    } label: {
-                        Circle()
-                            .fill(color.color)
-                            .frame(width: 44, height: 44)
-                            .shadow(color: color.color.opacity(0.6), radius: 6)
-                            .overlay(
-                                Circle().stroke(Color.white.opacity(0.3), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            // Action row
-            HStack(spacing: 12) {
-                // Clear button
-                Button(action: onClear) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "delete.left")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Clear")
-                            .font(.system(size: 14, weight: .semibold))
-                    }
+    private var headerBar: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Code Breaker")
+                    .font(.title2.bold())
                     .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color(red: 0.35, green: 0.18, blue: 0.18))
-                    )
-                }
-                .buttonStyle(.plain)
+                Text("Attempts: \(guessHistory.count)/\(difficulty.maxAttempts)")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.6))
+            }
 
-                // Submit button
-                Button(action: onSubmit) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Submit")
-                            .font(.system(size: 14, weight: .bold))
-                    }
-                    .foregroundColor(canSubmit ? .white : Color.white.opacity(0.35))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(
-                                canSubmit
-                                    ? Color(red: 0.18, green: 0.45, blue: 0.25)
-                                    : Color(red: 0.20, green: 0.20, blue: 0.25)
-                            )
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSubmit)
+            Spacer()
+
+            // Difficulty badge
+            difficultyBadge
+
+            // New game button
+            Button(action: startNewGame) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.title3)
+                    .foregroundColor(.white)
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: Circle())
             }
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(red: 0.16, green: 0.16, blue: 0.22))
-        )
-        .padding(.bottom, 4)
     }
-}
 
-// MARK: - End Screen
+    private var difficultyBadge: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(difficulty.badgeColor)
+                .frame(width: 8, height: 8)
+            Text(difficulty.label)
+                .font(.caption.bold())
+                .foregroundColor(.white)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(difficulty.badgeColor.opacity(0.5), lineWidth: 1)
+        )
+    }
 
-struct CodeBreakerEndView: View {
-    let phase: CodeBreakerGamePhase
-    let onRestart: () -> Void
+    private var secretCodeRow: some View {
+        HStack(spacing: 8) {
+            Text("Secret:")
+                .font(.caption.bold())
+                .foregroundColor(.white.opacity(0.7))
 
-    var isWon: Bool { phase == .won }
+            HStack(spacing: 6) {
+                ForEach(0..<codeLength, id: \.self) { i in
+                    ZStack {
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 32, height: 32)
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(.white.opacity(0.2), lineWidth: 1)
+                            )
 
-    var body: some View {
-        VStack(spacing: 12) {
-            Text(isWon ? "YOU CRACKED IT!" : "CODE REMAINS HIDDEN")
-                .font(.system(size: 17, weight: .black, design: .monospaced))
-                .foregroundColor(isWon ? Color(red: 0.20, green: 0.88, blue: 0.45) : Color(red: 0.92, green: 0.30, blue: 0.30))
-                .multilineTextAlignment(.center)
-
-            Button(action: onRestart) {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 15, weight: .bold))
-                    Text("New Game")
-                        .font(.system(size: 16, weight: .bold))
+                        if showSecret, i < secretCode.count {
+                            Circle()
+                                .fill(secretCode[i].color)
+                                .frame(width: 24, height: 24)
+                                .shadow(color: secretCode[i].color.opacity(0.6), radius: 4)
+                        } else {
+                            Image(systemName: "questionmark")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white.opacity(0.4))
+                        }
+                    }
                 }
+            }
+
+            Spacer()
+
+            Button(action: { showSecret.toggle() }) {
+                HStack(spacing: 4) {
+                    Image(systemName: showSecret ? "eye.slash" : "eye")
+                    Text(showSecret ? "Hide" : "Reveal")
+                }
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.6))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.ultraThinMaterial, in: Capsule())
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    private var historySection: some View {
+        VStack(spacing: 6) {
+            if guessHistory.isEmpty {
+                Text("Make your first guess!")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.4))
+                    .padding(.vertical, 12)
+            } else {
+                ForEach(guessHistory.indices, id: \.self) { i in
+                    guessRow(guess: guessHistory[i], index: i)
+                }
+            }
+        }
+    }
+
+    private func guessRow(guess: CodeBreakerGuess, index: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("\(index + 1)")
+                .font(.caption2.bold())
+                .foregroundColor(.white.opacity(0.4))
+                .frame(width: 18)
+
+            HStack(spacing: 6) {
+                ForEach(0..<guess.colors.count, id: \.self) { i in
+                    Circle()
+                        .fill(guess.colors[i].color)
+                        .frame(width: 30, height: 30)
+                        .shadow(color: guess.colors[i].color.opacity(0.5), radius: 3)
+                        .overlay(Circle().strokeBorder(.white.opacity(0.2), lineWidth: 1))
+                }
+            }
+
+            Spacer()
+
+            // Feedback pegs
+            feedbackPegs(blacks: guess.blacks, whites: guess.whites, codeLength: guess.colors.count)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(
+                    index == guessHistory.count - 1 ? Color.white.opacity(0.25) : Color.white.opacity(0.08),
+                    lineWidth: 1
+                )
+        )
+    }
+
+    private func feedbackPegs(blacks: Int, whites: Int, codeLength: Int) -> some View {
+        let total = codeLength
+        let cols = codeLength <= 4 ? 2 : 3
+        let rows = Int(ceil(Double(total) / Double(cols)))
+
+        return VStack(spacing: 3) {
+            ForEach(0..<rows, id: \.self) { row in
+                HStack(spacing: 3) {
+                    ForEach(0..<cols, id: \.self) { col in
+                        let idx = row * cols + col
+                        if idx < total {
+                            Circle()
+                                .fill(pegColor(index: idx, blacks: blacks, whites: whites))
+                                .frame(width: 10, height: 10)
+                                .shadow(
+                                    color: idx < blacks ? Color.black.opacity(0.4) :
+                                           idx < blacks + whites ? Color.white.opacity(0.3) : Color.clear,
+                                    radius: 2
+                                )
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: 36)
+    }
+
+    private func pegColor(index: Int, blacks: Int, whites: Int) -> Color {
+        if index < blacks { return Color.black.opacity(0.85) }
+        if index < blacks + whites { return Color.white.opacity(0.85) }
+        return Color.white.opacity(0.12)
+    }
+
+    private var currentGuessSection: some View {
+        VStack(spacing: 8) {
+            Text("Your Guess")
+                .font(.caption.bold())
+                .foregroundColor(.white.opacity(0.6))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 10) {
+                ForEach(0..<codeLength, id: \.self) { i in
+                    guessSlot(index: i)
+                }
+            }
+        }
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(.white.opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    private func guessSlot(index: Int) -> some View {
+        let isSelected = selectedSlot == index
+        let color = index < currentGuess.count ? currentGuess[index] : nil
+
+        return ZStack {
+            Circle()
+                .fill(isSelected ? Color.white.opacity(0.15) : Color.white.opacity(0.06))
+                .frame(width: 44, height: 44)
+                .overlay(
+                    Circle()
+                        .strokeBorder(
+                            isSelected ? Color.white.opacity(0.6) : Color.white.opacity(0.2),
+                            lineWidth: isSelected ? 2 : 1
+                        )
+                )
+                .shadow(color: isSelected ? Color.white.opacity(0.2) : .clear, radius: 4)
+
+            if let c = color {
+                Circle()
+                    .fill(c.color)
+                    .frame(width: 34, height: 34)
+                    .shadow(color: c.color.opacity(0.6), radius: 5)
+            } else {
+                if isSelected {
+                    Circle()
+                        .fill(Color.white.opacity(0.3))
+                        .frame(width: 10, height: 10)
+                }
+            }
+        }
+        .onTapGesture {
+            if gameState == .playing {
+                selectedSlot = index
+            }
+        }
+    }
+
+    private var colorPalette: some View {
+        VStack(spacing: 8) {
+            Text("Choose Color")
+                .font(.caption.bold())
+                .foregroundColor(.white.opacity(0.6))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 10) {
+                ForEach(palette, id: \.name) { c in
+                    colorButton(c)
+                }
+            }
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    private func colorButton(_ c: CodeBreakerColor) -> some View {
+        let isChosen = selectedSlot < currentGuess.count && currentGuess[selectedSlot] == c
+
+        return Button(action: { placeColor(c) }) {
+            ZStack {
+                Circle()
+                    .fill(c.color)
+                    .frame(width: 40, height: 40)
+                    .shadow(color: c.color.opacity(0.6), radius: isChosen ? 8 : 3)
+
+                if isChosen {
+                    Circle()
+                        .strokeBorder(.white, lineWidth: 3)
+                        .frame(width: 40, height: 40)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(isChosen ? 1.15 : 1.0)
+        .animation(.spring(response: 0.2), value: isChosen)
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 12) {
+            // Clear slot button
+            Button(action: clearSlot) {
+                HStack(spacing: 6) {
+                    Image(systemName: "delete.left")
+                    Text("Clear")
+                }
+                .font(.callout.bold())
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .frame(height: 48)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            isWon
-                                ? Color(red: 0.18, green: 0.50, blue: 0.28)
-                                : Color(red: 0.38, green: 0.18, blue: 0.18)
-                        )
-                )
+                .padding(.vertical, 12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.2), lineWidth: 1))
             }
             .buttonStyle(.plain)
+
+            // Submit button
+            Button(action: submitGuess) {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("Submit")
+                }
+                .font(.callout.bold())
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(
+                    isGuessComplete ?
+                        LinearGradient(colors: [.purple, .blue], startPoint: .leading, endPoint: .trailing) :
+                        LinearGradient(colors: [.gray.opacity(0.4), .gray.opacity(0.3)], startPoint: .leading, endPoint: .trailing),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.2), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .disabled(!isGuessComplete || gameState != .playing)
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(red: 0.16, green: 0.16, blue: 0.22))
-        )
-        .padding(.bottom, 4)
+    }
+
+    private var gameOverOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.5)
+                .ignoresSafeArea()
+                .onTapGesture { } // block taps through
+
+            VStack(spacing: 20) {
+                // Win/Lose icon
+                ZStack {
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .frame(width: 80, height: 80)
+
+                    Image(systemName: gameState == .won ? "star.fill" : "xmark.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(gameState == .won ? .yellow : .red)
+                        .shadow(color: gameState == .won ? .yellow.opacity(0.6) : .red.opacity(0.4), radius: 8)
+                }
+
+                Text(gameState == .won ? "Code Cracked!" : "Code Lost!")
+                    .font(.title.bold())
+                    .foregroundColor(.white)
+
+                Text(gameState == .won
+                     ? "Solved in \(guessHistory.count) attempt\(guessHistory.count == 1 ? "" : "s")"
+                     : "Better luck next time!")
+                    .font(.callout)
+                    .foregroundColor(.white.opacity(0.7))
+
+                // Secret reveal
+                HStack(spacing: 8) {
+                    Text("Secret:")
+                        .font(.caption.bold())
+                        .foregroundColor(.white.opacity(0.6))
+                    HStack(spacing: 6) {
+                        ForEach(secretCode.indices, id: \.self) { i in
+                            Circle()
+                                .fill(secretCode[i].color)
+                                .frame(width: 28, height: 28)
+                                .shadow(color: secretCode[i].color.opacity(0.6), radius: 4)
+                        }
+                    }
+                }
+                .padding(10)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+
+                // Stats row
+                HStack(spacing: 16) {
+                    statItem(label: "Difficulty", value: difficulty.label, color: difficulty.badgeColor)
+                    statItem(label: "Avg Score", value: averageScoreText, color: .blue)
+                    statItem(label: "Rounds", value: "\(roundScores.count)", color: .purple)
+                }
+
+                // Difficulty hint
+                if roundScores.count >= 2 {
+                    Text(difficultyHintText)
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.5))
+                        .multilineTextAlignment(.center)
+                }
+
+                Button(action: startNewGame) {
+                    Text("Play Again")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(width: 180)
+                        .padding(.vertical, 14)
+                        .background(
+                            LinearGradient(colors: [.purple, .blue], startPoint: .leading, endPoint: .trailing),
+                            in: RoundedRectangle(cornerRadius: 14)
+                        )
+                        .shadow(color: .purple.opacity(0.4), radius: 8)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(28)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.2), lineWidth: 1))
+            .shadow(color: .black.opacity(0.4), radius: 30)
+            .padding(.horizontal, 32)
+        }
+    }
+
+    private func statItem(label: String, value: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.title3.bold())
+                .foregroundColor(color)
+            Text(label)
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.5))
+        }
+        .frame(width: 80)
+    }
+
+    // MARK: - Computed helpers
+
+    private var isGuessComplete: Bool {
+        currentGuess.count == codeLength && !currentGuess.contains(nil)
+    }
+
+    private var averageScoreText: String {
+        guard !roundScores.isEmpty else { return "—" }
+        let avg = Double(roundScores.reduce(0, +)) / Double(roundScores.count)
+        return String(format: "%.1f", avg)
+    }
+
+    private var difficultyHintText: String {
+        guard roundScores.count >= 2 else { return "" }
+        let avg = Double(roundScores.suffix(5).reduce(0, +)) / Double(roundScores.suffix(5).count)
+        if avg >= 7 {
+            return "Great performance! Difficulty increased."
+        } else if avg <= 3 {
+            return "Keep practicing! Difficulty decreased."
+        } else {
+            return "Steady performance. Difficulty maintained."
+        }
+    }
+
+    // MARK: - Game Logic
+
+    private func startNewGame() {
+        let colors = Array(CodeBreakerColor.allCases.prefix(difficulty.paletteCount))
+        secretCode = (0..<codeLength).map { _ in colors.randomElement()! }
+        currentGuess = Array(repeating: nil, count: codeLength)
+        guessHistory = []
+        gameState = .playing
+        selectedSlot = 0
+        showSecret = false
+        animateWin = false
+    }
+
+    private func placeColor(_ color: CodeBreakerColor) {
+        guard gameState == .playing else { return }
+        while currentGuess.count <= selectedSlot {
+            currentGuess.append(nil)
+        }
+        currentGuess[selectedSlot] = color
+        // Advance to next empty slot
+        advanceSlot()
+    }
+
+    private func advanceSlot() {
+        // find next nil slot after current
+        for i in (selectedSlot + 1)..<codeLength {
+            if i >= currentGuess.count || currentGuess[i] == nil {
+                selectedSlot = i
+                return
+            }
+        }
+        // wrap to first empty
+        for i in 0..<codeLength {
+            if i >= currentGuess.count || currentGuess[i] == nil {
+                selectedSlot = i
+                return
+            }
+        }
+        // all filled, stay at last
+        selectedSlot = min(selectedSlot, codeLength - 1)
+    }
+
+    private func clearSlot() {
+        guard gameState == .playing else { return }
+        if selectedSlot < currentGuess.count {
+            currentGuess[selectedSlot] = nil
+        }
+    }
+
+    private func submitGuess() {
+        guard isGuessComplete, gameState == .playing else { return }
+
+        let guessColors = (0..<codeLength).compactMap { i -> CodeBreakerColor? in
+            i < currentGuess.count ? currentGuess[i] : nil
+        }
+
+        guard guessColors.count == codeLength else { return }
+
+        let (blacks, whites) = computeFeedback(guess: guessColors, secret: secretCode)
+        let entry = CodeBreakerGuess(colors: guessColors, blacks: blacks, whites: whites)
+        guessHistory.append(entry)
+
+        if blacks == codeLength {
+            // Won - score based on attempts remaining
+            let score = difficulty.maxAttempts - guessHistory.count + 1
+            appendScore(score)
+            gameState = .won
+            animateWin = true
+        } else if guessHistory.count >= difficulty.maxAttempts {
+            appendScore(0)
+            gameState = .lost
+        } else {
+            // Reset guess
+            currentGuess = Array(repeating: nil, count: codeLength)
+            selectedSlot = 0
+        }
+    }
+
+    private func computeFeedback(guess: [CodeBreakerColor], secret: [CodeBreakerColor]) -> (Int, Int) {
+        var blacks = 0
+        var secretUsed = Array(repeating: false, count: secret.count)
+        var guessUsed = Array(repeating: false, count: guess.count)
+
+        // Count blacks
+        for i in 0..<guess.count {
+            if guess[i] == secret[i] {
+                blacks += 1
+                secretUsed[i] = true
+                guessUsed[i] = true
+            }
+        }
+
+        // Count whites
+        var whites = 0
+        for i in 0..<guess.count where !guessUsed[i] {
+            for j in 0..<secret.count where !secretUsed[j] {
+                if guess[i] == secret[j] {
+                    whites += 1
+                    secretUsed[j] = true
+                    break
+                }
+            }
+        }
+
+        return (blacks, whites)
+    }
+
+    // MARK: - Adaptive Difficulty
+
+    private func appendScore(_ score: Int) {
+        roundScores.append(score)
+        if roundScores.count > 5 {
+            roundScores = Array(roundScores.suffix(5))
+        }
+        adjustDifficulty()
+    }
+
+    private func adjustDifficulty() {
+        guard roundScores.count >= 2 else { return }
+        let recent = roundScores.suffix(5)
+        let avg = Double(recent.reduce(0, +)) / Double(recent.count)
+
+        // avg score near maxAttempts = doing well, increase difficulty
+        // avg score near 0 = struggling, decrease difficulty
+        if avg >= 6 {
+            // Performing very well -> increase difficulty
+            switch difficulty {
+            case .easy:   difficulty = .medium
+            case .medium: difficulty = .hard
+            case .hard:   break
+            }
+        } else if avg <= 2 {
+            // Struggling -> decrease difficulty
+            switch difficulty {
+            case .hard:   difficulty = .medium
+            case .medium: difficulty = .easy
+            case .easy:   break
+            }
+        }
+        // else keep current difficulty
+    }
+}
+
+// MARK: - Preview
+
+struct CodeBreakerView_Previews: PreviewProvider {
+    static var previews: some View {
+        CodeBreakerView()
+            .preferredColorScheme(.dark)
     }
 }

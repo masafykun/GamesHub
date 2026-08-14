@@ -1,363 +1,564 @@
 import SwiftUI
 
-// MARK: - Constants
+// MARK: - Models
 
-private enum ColorFloodConstants {
-    static let gridSize = 8
-    static let colorCount = 5
-    static let maxMoves = 25
+struct ColorFloodCell {
+    var colorIndex: Int
 }
 
-// MARK: - Color Definitions
+enum ColorFloodDifficulty: String {
+    case easy = "Easy"
+    case medium = "Medium"
+    case hard = "Hard"
 
-enum ColorFloodColor: Int, CaseIterable {
-    case red = 0
-    case blue = 1
-    case green = 2
-    case yellow = 3
-    case purple = 4
-
-    var color: Color {
+    var gridSize: Int {
         switch self {
-        case .red:    return Color(red: 0.93, green: 0.27, blue: 0.27)
-        case .blue:   return Color(red: 0.25, green: 0.54, blue: 0.92)
-        case .green:  return Color(red: 0.22, green: 0.75, blue: 0.44)
-        case .yellow: return Color(red: 0.98, green: 0.80, blue: 0.17)
-        case .purple: return Color(red: 0.65, green: 0.31, blue: 0.87)
+        case .easy:   return 7
+        case .medium: return 8
+        case .hard:   return 10
+        }
+    }
+
+    var colorCount: Int {
+        switch self {
+        case .easy:   return 4
+        case .medium: return 5
+        case .hard:   return 6
+        }
+    }
+
+    var maxMoves: Int {
+        switch self {
+        case .easy:   return 30
+        case .medium: return 25
+        case .hard:   return 28
+        }
+    }
+
+    var badgeColor: Color {
+        switch self {
+        case .easy:   return .green
+        case .medium: return .orange
+        case .hard:   return .red
         }
     }
 }
 
-// MARK: - Game Model
+// MARK: - View Model Logic Helpers
 
-class ColorFloodGame: ObservableObject {
-    @Published var grid: [[Int]] = []
-    @Published var moves: Int = 0
-    @Published var gameState: ColorFloodState = .playing
-
-    var currentColor: Int {
-        grid.isEmpty ? 0 : grid[0][0]
+private func colorFloodComputeDifficulty(scores: [Int]) -> ColorFloodDifficulty {
+    guard !scores.isEmpty else { return .medium }
+    let avg = Double(scores.reduce(0, +)) / Double(scores.count)
+    // avg is percentage of board filled relative to max moves
+    // High score (>= 80) means player is good -> increase difficulty
+    // Low score (< 40) means player is struggling -> decrease difficulty
+    if avg >= 75 {
+        return .hard
+    } else if avg >= 45 {
+        return .medium
+    } else {
+        return .easy
     }
-
-    init() {
-        startNewGame()
-    }
-
-    func startNewGame() {
-        let size = ColorFloodConstants.gridSize
-        var newGrid = [[Int]](repeating: [Int](repeating: 0, count: size), count: size)
-        for row in 0..<size {
-            for col in 0..<size {
-                newGrid[row][col] = Int.random(in: 0..<ColorFloodConstants.colorCount)
-            }
-        }
-        grid = newGrid
-        moves = 0
-        gameState = .playing
-    }
-
-    func applyColor(_ colorIndex: Int) {
-        guard gameState == .playing else { return }
-        guard colorIndex != currentColor else { return }
-
-        let oldColor = currentColor
-        floodFill(row: 0, col: 0, oldColor: oldColor, newColor: colorIndex)
-        moves += 1
-
-        if isBoardSingleColor() {
-            gameState = .won
-        } else if moves >= ColorFloodConstants.maxMoves {
-            gameState = .lost
-        }
-    }
-
-    private func floodFill(row: Int, col: Int, oldColor: Int, newColor: Int) {
-        let size = ColorFloodConstants.gridSize
-        var visited = [[Bool]](repeating: [Bool](repeating: false, count: size), count: size)
-        var queue: [(Int, Int)] = [(0, 0)]
-        visited[0][0] = true
-
-        while !queue.isEmpty {
-            let (r, c) = queue.removeFirst()
-            grid[r][c] = newColor
-
-            let neighbors = [(r-1, c), (r+1, c), (r, c-1), (r, c+1)]
-            for (nr, nc) in neighbors {
-                guard nr >= 0, nr < size, nc >= 0, nc < size else { continue }
-                guard !visited[nr][nc] else { continue }
-                if grid[nr][nc] == oldColor {
-                    visited[nr][nc] = true
-                    queue.append((nr, nc))
-                }
-            }
-        }
-    }
-
-    private func isBoardSingleColor() -> Bool {
-        let size = ColorFloodConstants.gridSize
-        let first = grid[0][0]
-        for row in 0..<size {
-            for col in 0..<size {
-                if grid[row][col] != first { return false }
-            }
-        }
-        return true
-    }
-}
-
-// MARK: - Game State
-
-enum ColorFloodState {
-    case playing
-    case won
-    case lost
 }
 
 // MARK: - Main View
 
 struct ColorFloodView: View {
-    @StateObject private var game = ColorFloodGame()
+
+    // MARK: Difficulty & Scoring
+    @State var roundScores: [Int] = []
+    @State private var difficulty: ColorFloodDifficulty = .medium
+
+    // MARK: Board State
+    @State private var grid: [[ColorFloodCell]] = []
+    @State private var playerRegion: Set<ColorFloodCoord> = []
+    @State private var moves: Int = 0
+    @State private var gamePhase: ColorFloodPhase = .playing
+
+    // MARK: Animation
+    @State private var animatingFlood: Bool = false
+    @State private var selectedColor: Int? = nil
+    @State private var winPulse: Bool = false
+    @State private var showResultOverlay: Bool = false
+
+    // MARK: Computed
+    private var gridSize: Int { difficulty.gridSize }
+    private var colorCount: Int { difficulty.colorCount }
+    private var maxMoves: Int { difficulty.maxMoves }
+
+    private let colorPalette: [Color] = [
+        Color(red: 0.95, green: 0.27, blue: 0.27), // red
+        Color(red: 0.20, green: 0.78, blue: 0.35), // green
+        Color(red: 0.25, green: 0.55, blue: 0.95), // blue
+        Color(red: 0.98, green: 0.75, blue: 0.15), // yellow
+        Color(red: 0.85, green: 0.25, blue: 0.90), // purple
+        Color(red: 0.15, green: 0.88, blue: 0.88), // cyan
+    ]
+
+    // MARK: - Body
 
     var body: some View {
         ZStack {
-            Color(.systemGray6)
-                .ignoresSafeArea()
+            backgroundGradient
 
-            VStack(spacing: 20) {
-                ColorFloodHeaderView(moves: game.moves, maxMoves: ColorFloodConstants.maxMoves)
+            VStack(spacing: 16) {
+                headerBar
+                difficultyBadge
+                boardView
+                Spacer(minLength: 8)
+                colorButtons
+                Spacer(minLength: 12)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
 
-                ColorFloodGridView(grid: game.grid)
-                    .padding(.horizontal, 16)
+            if showResultOverlay {
+                resultOverlay
+            }
+        }
+        .onAppear { startNewGame() }
+    }
 
-                ColorFloodButtonsView(
-                    currentColor: game.currentColor,
-                    onColorTap: { colorIndex in
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            game.applyColor(colorIndex)
-                        }
-                    }
-                )
-                .padding(.horizontal, 24)
+    // MARK: - Background
 
-                Button(action: { game.startNewGame() }) {
-                    Text("New Game")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .padding(.horizontal, 32)
-                        .padding(.vertical, 12)
-                        .neumorphicCard(radius: 12)
+    private var backgroundGradient: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.07, green: 0.07, blue: 0.15),
+                Color(red: 0.10, green: 0.05, blue: 0.20),
+                Color(red: 0.05, green: 0.10, blue: 0.18)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
+
+    // MARK: - Header
+
+    private var headerBar: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Color Flood")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Flood the board from the top-left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+
+            Spacer()
+
+            HStack(spacing: 16) {
+                movesCounter
+                Button(action: { startNewGame() }) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.8))
+                        .padding(10)
+                        .background(.ultraThinMaterial, in: Circle())
                 }
             }
-            .padding(.top, 20)
-
-            if game.gameState != .playing {
-                ColorFloodOverlayView(
-                    state: game.gameState,
-                    moves: game.moves,
-                    onRestart: { game.startNewGame() }
-                )
-            }
         }
+        .padding(.top, 4)
     }
-}
 
-// MARK: - Header View
-
-struct ColorFloodHeaderView: View {
-    let moves: Int
-    let maxMoves: Int
-
-    var body: some View {
-        VStack(spacing: 6) {
-            Text("Color Flood")
-                .font(.system(size: 28, weight: .bold))
-                .foregroundColor(.primary)
-
-            HStack(spacing: 8) {
-                Text("Moves: \(moves) / \(maxMoves)")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.secondary)
-
-                ColorFloodProgressBar(moves: moves, maxMoves: maxMoves)
-                    .frame(width: 100, height: 8)
-            }
+    private var movesCounter: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "hand.tap.fill")
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.7))
+            Text("\(moves)")
+                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .foregroundColor(moveColor)
+            Text("/ \(maxMoves)")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.white.opacity(0.5))
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 24)
-        .neumorphicCard(radius: 16)
-        .padding(.horizontal, 24)
-    }
-}
-
-// MARK: - Progress Bar
-
-struct ColorFloodProgressBar: View {
-    let moves: Int
-    let maxMoves: Int
-
-    private var fraction: CGFloat {
-        CGFloat(moves) / CGFloat(maxMoves)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private var barColor: Color {
-        if fraction < 0.5 { return .green }
-        if fraction < 0.8 { return .yellow }
+    private var moveColor: Color {
+        let ratio = Double(moves) / Double(maxMoves)
+        if ratio < 0.5 { return .green }
+        if ratio < 0.8 { return .orange }
         return .red
     }
 
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(.systemGray4))
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(barColor)
-                    .frame(width: geo.size.width * min(fraction, 1.0))
+    // MARK: - Difficulty Badge
+
+    private var difficultyBadge: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(difficulty.badgeColor)
+                .frame(width: 8, height: 8)
+            Text(difficulty.rawValue)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(difficulty.badgeColor)
+            Text("· \(gridSize)×\(gridSize) · \(colorCount) colors")
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.5))
+            Spacer()
+            if !roundScores.isEmpty {
+                Text("Avg: \(Int(Double(roundScores.reduce(0, +)) / Double(roundScores.count)))%")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.45))
             }
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
-}
 
-// MARK: - Grid View
+    // MARK: - Board
 
-struct ColorFloodGridView: View {
-    let grid: [[Int]]
-
-    var body: some View {
+    private var boardView: some View {
         GeometryReader { geo in
             let size = min(geo.size.width, geo.size.height)
-            let cellSize = size / CGFloat(ColorFloodConstants.gridSize)
-
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(.systemGray5))
-                    .shadow(color: Color(.systemGray4), radius: 6, x: 4, y: 4)
-                    .shadow(color: .white.opacity(0.8), radius: 6, x: -4, y: -4)
+            let cellSize = size / CGFloat(gridSize)
+            ZStack {
+                // Glass card backing
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.3), .white.opacity(0.05)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.5
+                            )
+                    )
+                    .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 10)
 
                 VStack(spacing: 2) {
-                    ForEach(0..<ColorFloodConstants.gridSize, id: \.self) { row in
+                    ForEach(0..<gridSize, id: \.self) { row in
                         HStack(spacing: 2) {
-                            ForEach(0..<ColorFloodConstants.gridSize, id: \.self) { col in
-                                let colorIndex = grid[row][col]
-                                let floodColor = ColorFloodColor(rawValue: colorIndex)?.color ?? .gray
-                                Rectangle()
-                                    .fill(floodColor)
+                            ForEach(0..<gridSize, id: \.self) { col in
+                                let coord = ColorFloodCoord(row: row, col: col)
+                                let inRegion = playerRegion.contains(coord)
+                                let colorIdx = grid.isEmpty ? 0 : grid[row][col].colorIndex
+                                RoundedRectangle(cornerRadius: cellCornerRadius(size: cellSize))
+                                    .fill(colorPalette[min(colorIdx, colorPalette.count - 1)])
                                     .frame(width: cellSize - 2, height: cellSize - 2)
-                                    .cornerRadius(col == 0 && row == 0 ? 8 : 2)
                                     .overlay(
-                                        col == 0 && row == 0 ?
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color.white.opacity(0.9), lineWidth: 2)
-                                        : nil
+                                        RoundedRectangle(cornerRadius: cellCornerRadius(size: cellSize))
+                                            .fill(
+                                                inRegion
+                                                ? LinearGradient(colors: [.white.opacity(0.35), .clear], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                                : LinearGradient(colors: [.black.opacity(0.08), .clear], startPoint: .top, endPoint: .bottom)
+                                            )
                                     )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: cellCornerRadius(size: cellSize))
+                                            .strokeBorder(inRegion ? Color.white.opacity(0.5) : Color.clear, lineWidth: 1)
+                                    )
+                                    .scaleEffect(inRegion && winPulse ? 0.92 : 1.0)
+                                    .animation(.easeInOut(duration: 0.4).repeatForever(autoreverses: true), value: winPulse)
                             }
                         }
                     }
                 }
-                .padding(4)
+                .padding(10)
             }
             .frame(width: size, height: size)
         }
         .aspectRatio(1, contentMode: .fit)
     }
-}
 
-// MARK: - Color Buttons View
+    private func cellCornerRadius(size: CGFloat) -> CGFloat {
+        max(2, size * 0.18)
+    }
 
-struct ColorFloodButtonsView: View {
-    let currentColor: Int
-    let onColorTap: (Int) -> Void
+    // MARK: - Color Buttons
 
-    var body: some View {
-        HStack(spacing: 12) {
-            ForEach(0..<ColorFloodConstants.colorCount, id: \.self) { index in
-                ColorFloodColorButton(
-                    colorIndex: index,
-                    isSelected: index == currentColor,
-                    onTap: { onColorTap(index) }
-                )
+    private var colorButtons: some View {
+        HStack(spacing: 10) {
+            ForEach(0..<colorCount, id: \.self) { idx in
+                let isCurrent = !playerRegion.isEmpty && !grid.isEmpty
+                    && grid[0][0].colorIndex == idx
+                    && playerRegion.contains(ColorFloodCoord(row: 0, col: 0))
+                    && colorIndexOfRegion() == idx
+
+                Button(action: {
+                    colorFloodTapColor(idx)
+                }) {
+                    ZStack {
+                        Circle()
+                            .fill(colorPalette[idx])
+                            .shadow(color: colorPalette[idx].opacity(0.6), radius: isCurrent ? 14 : 6, x: 0, y: 0)
+                        if isCurrent {
+                            Circle()
+                                .strokeBorder(.white, lineWidth: 3)
+                        }
+                        if selectedColor == idx {
+                            Circle()
+                                .fill(.white.opacity(0.3))
+                        }
+                    }
+                }
+                .frame(width: 52, height: 52)
+                .scaleEffect(isCurrent ? 1.12 : 1.0)
+                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isCurrent)
+                .disabled(gamePhase != .playing || animatingFlood)
             }
         }
-    }
-}
-
-// MARK: - Individual Color Button
-
-struct ColorFloodColorButton: View {
-    let colorIndex: Int
-    let isSelected: Bool
-    let onTap: () -> Void
-
-    @State private var isPressed = false
-
-    private var buttonColor: Color {
-        ColorFloodColor(rawValue: colorIndex)?.color ?? .gray
+        .padding(.horizontal, 12)
+        .padding(.vertical, 14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24)
+                .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+        )
     }
 
-    var body: some View {
-        Circle()
-            .fill(buttonColor)
-            .frame(width: isSelected ? 56 : 48, height: isSelected ? 56 : 48)
-            .shadow(color: buttonColor.opacity(0.6), radius: isSelected ? 8 : 4, x: 0, y: 4)
-            .overlay(
-                Circle()
-                    .stroke(Color.white, lineWidth: isSelected ? 3 : 0)
-            )
-            .scaleEffect(isPressed ? 0.9 : 1.0)
-            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isSelected)
-            .animation(.easeInOut(duration: 0.1), value: isPressed)
-            .onTapGesture {
-                isPressed = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isPressed = false
-                }
-                onTap()
-            }
+    private func colorIndexOfRegion() -> Int {
+        guard !grid.isEmpty, let first = playerRegion.first else { return -1 }
+        return grid[first.row][first.col].colorIndex
     }
-}
 
-// MARK: - Overlay View
+    // MARK: - Result Overlay
 
-struct ColorFloodOverlayView: View {
-    let state: ColorFloodState
-    let moves: Int
-    let onRestart: () -> Void
-
-    private var isWin: Bool { state == .won }
-
-    var body: some View {
+    private var resultOverlay: some View {
         ZStack {
-            Color.black.opacity(0.45)
+            Color.black.opacity(0.55)
                 .ignoresSafeArea()
+                .onTapGesture { } // absorb taps
 
-            VStack(spacing: 20) {
-                Text(isWin ? "You Win!" : "Game Over")
-                    .font(.system(size: 36, weight: .bold))
-                    .foregroundColor(isWin ? .green : .red)
+            VStack(spacing: 24) {
+                // Icon
+                ZStack {
+                    Circle()
+                        .fill(gamePhase == .won ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
+                        .frame(width: 100, height: 100)
+                    Image(systemName: gamePhase == .won ? "star.fill" : "xmark.circle.fill")
+                        .font(.system(size: 52))
+                        .foregroundColor(gamePhase == .won ? .yellow : .red)
+                }
 
-                Text(isWin
-                     ? "Flooded the board in \(moves) move\(moves == 1 ? "" : "s")!"
-                     : "You used all \(ColorFloodConstants.maxMoves) moves.")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.primary)
-                    .multilineTextAlignment(.center)
-
-                Button(action: onRestart) {
-                    Text("Play Again")
-                        .font(.system(size: 18, weight: .semibold))
+                VStack(spacing: 8) {
+                    Text(gamePhase == .won ? "You Win!" : "Game Over")
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
-                        .padding(.horizontal, 40)
-                        .padding(.vertical, 14)
-                        .background(isWin ? Color.green : Color.blue)
-                        .cornerRadius(16)
-                        .shadow(color: (isWin ? Color.green : Color.blue).opacity(0.4), radius: 8, x: 0, y: 4)
+                    Text(gamePhase == .won
+                         ? "Flooded in \(moves) moves"
+                         : "Ran out of moves!")
+                        .font(.system(size: 16))
+                        .foregroundColor(.white.opacity(0.7))
+
+                    if !roundScores.isEmpty {
+                        let avg = Double(roundScores.reduce(0, +)) / Double(roundScores.count)
+                        Text(String(format: "5-round avg: %.0f%%", avg))
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                }
+
+                HStack(spacing: 16) {
+                    VStack(spacing: 2) {
+                        Text("Next")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.5))
+                        Text(colorFloodComputeDifficulty(scores: roundScores).rawValue)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(colorFloodComputeDifficulty(scores: roundScores).badgeColor)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+
+                    Button(action: { startNewGame() }) {
+                        Text("Play Again")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 32)
+                            .padding(.vertical, 14)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color.purple, Color.blue],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                ),
+                                in: RoundedRectangle(cornerRadius: 16)
+                            )
+                            .shadow(color: .purple.opacity(0.5), radius: 10, x: 0, y: 4)
+                    }
                 }
             }
             .padding(36)
-            .background(Color(.systemGray6))
-            .cornerRadius(24)
-            .shadow(radius: 20)
-            .padding(.horizontal, 40)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28))
+            .overlay(
+                RoundedRectangle(cornerRadius: 28)
+                    .strokeBorder(.white.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 15)
+            .padding(.horizontal, 28)
+            .transition(.scale(scale: 0.85).combined(with: .opacity))
+        }
+        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: showResultOverlay)
+    }
+
+    // MARK: - Game Logic
+
+    private func startNewGame() {
+        withAnimation(.easeOut(duration: 0.2)) {
+            showResultOverlay = false
+        }
+        winPulse = false
+        animatingFlood = false
+        selectedColor = nil
+        moves = 0
+        gamePhase = .playing
+
+        let size = gridSize
+        let colors = colorCount
+        var newGrid: [[ColorFloodCell]] = []
+        for _ in 0..<size {
+            var row: [ColorFloodCell] = []
+            for _ in 0..<size {
+                row.append(ColorFloodCell(colorIndex: Int.random(in: 0..<colors)))
+            }
+            newGrid.append(row)
+        }
+        grid = newGrid
+        playerRegion = colorFloodBuildInitialRegion(grid: newGrid, size: size)
+    }
+
+    private func colorFloodBuildInitialRegion(grid: [[ColorFloodCell]], size: Int) -> Set<ColorFloodCoord> {
+        let startColor = grid[0][0].colorIndex
+        var region = Set<ColorFloodCoord>()
+        var queue = [ColorFloodCoord(row: 0, col: 0)]
+        region.insert(ColorFloodCoord(row: 0, col: 0))
+        while !queue.isEmpty {
+            let cur = queue.removeFirst()
+            for neighbor in colorFloodNeighbors(coord: cur, size: size) {
+                if !region.contains(neighbor) && grid[neighbor.row][neighbor.col].colorIndex == startColor {
+                    region.insert(neighbor)
+                    queue.append(neighbor)
+                }
+            }
+        }
+        return region
+    }
+
+    private func colorFloodTapColor(_ colorIdx: Int) {
+        guard gamePhase == .playing, !animatingFlood else { return }
+        let currentColor = colorIndexOfRegion()
+        guard colorIdx != currentColor else { return }
+
+        selectedColor = colorIdx
+        moves += 1
+        animatingFlood = true
+
+        // Flood fill: color all cells in playerRegion to new color, then expand
+        withAnimation(.easeInOut(duration: 0.18)) {
+            for coord in playerRegion {
+                grid[coord.row][coord.col].colorIndex = colorIdx
+            }
+        }
+
+        // Expand region to absorb adjacent matching cells
+        let expanded = colorFloodExpandRegion(
+            current: playerRegion,
+            grid: grid,
+            colorIdx: colorIdx,
+            size: gridSize
+        )
+
+        withAnimation(.easeInOut(duration: 0.22)) {
+            playerRegion = expanded
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+            animatingFlood = false
+            selectedColor = nil
+            checkWinLose()
         }
     }
+
+    private func colorFloodExpandRegion(
+        current: Set<ColorFloodCoord>,
+        grid: [[ColorFloodCell]],
+        colorIdx: Int,
+        size: Int
+    ) -> Set<ColorFloodCoord> {
+        var region = current
+        var queue = Array(current)
+        while !queue.isEmpty {
+            let cur = queue.removeFirst()
+            for neighbor in colorFloodNeighbors(coord: cur, size: size) {
+                if !region.contains(neighbor) && grid[neighbor.row][neighbor.col].colorIndex == colorIdx {
+                    region.insert(neighbor)
+                    queue.append(neighbor)
+                }
+            }
+        }
+        return region
+    }
+
+    private func colorFloodNeighbors(coord: ColorFloodCoord, size: Int) -> [ColorFloodCoord] {
+        var result: [ColorFloodCoord] = []
+        let deltas = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        for (dr, dc) in deltas {
+            let nr = coord.row + dr
+            let nc = coord.col + dc
+            if nr >= 0 && nr < size && nc >= 0 && nc < size {
+                result.append(ColorFloodCoord(row: nr, col: nc))
+            }
+        }
+        return result
+    }
+
+    private func checkWinLose() {
+        let totalCells = gridSize * gridSize
+        let won = playerRegion.count == totalCells
+        let lost = moves >= maxMoves && !won
+
+        if won {
+            gamePhase = .won
+            winPulse = true
+            let score = max(0, 100 - Int((Double(moves) / Double(maxMoves)) * 100))
+            appendScore(score)
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.4)) {
+                showResultOverlay = true
+            }
+        } else if lost {
+            gamePhase = .lost
+            let score = Int((Double(playerRegion.count) / Double(totalCells)) * 100)
+            appendScore(score)
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.2)) {
+                showResultOverlay = true
+            }
+        }
+    }
+
+    private func appendScore(_ score: Int) {
+        roundScores.append(score)
+        if roundScores.count > 5 {
+            roundScores = Array(roundScores.suffix(5))
+        }
+        difficulty = colorFloodComputeDifficulty(scores: roundScores)
+    }
+}
+
+// MARK: - Supporting Types
+
+struct ColorFloodCoord: Hashable {
+    let row: Int
+    let col: Int
+}
+
+enum ColorFloodPhase {
+    case playing, won, lost
+}
+
+// MARK: - Preview
+
+#Preview {
+    ColorFloodView()
+        .preferredColorScheme(.dark)
 }

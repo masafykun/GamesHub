@@ -1,10 +1,10 @@
 import SwiftUI
 
-enum MBlGamePhase {
+enum MathBlitzPhase {
     case start, playing, gameOver
 }
 
-enum MBlOperation {
+enum MathBlitzOperation {
     case add, subtract, multiply
 
     func symbol() -> String {
@@ -16,17 +16,17 @@ enum MBlOperation {
     }
 }
 
-struct MBlQuestion {
+struct MathBlitzQuestion {
     let a: Int
     let b: Int
-    let op: MBlOperation
+    let op: MathBlitzOperation
     let answer: Int
     let choices: [Int]
 
-    static func generate(difficulty: Int) -> MBlQuestion {
-        let ops: [MBlOperation] = [.add, .subtract, .multiply]
+    static func generate(difficulty: Int) -> MathBlitzQuestion {
+        let ops: [MathBlitzOperation] = [.add, .subtract, .multiply]
         let op = ops[Int.random(in: 0..<ops.count)]
-        let range = 5 + difficulty * 3
+        let range = 5 + difficulty * 4
         var a = Int.random(in: 1...max(1, range))
         var b = Int.random(in: 1...max(1, range))
         if op == .subtract && b > a { swap(&a, &b) }
@@ -38,32 +38,42 @@ struct MBlQuestion {
         }
         var wrongs = Set<Int>()
         while wrongs.count < 3 {
-            let offset = Int.random(in: 1...10) * (Bool.random() ? 1 : -1)
+            let offset = Int.random(in: 1...12) * (Bool.random() ? 1 : -1)
             let w = answer + offset
             if w != answer && w >= 0 { wrongs.insert(w) }
         }
         var choices = Array(wrongs) + [answer]
         choices.shuffle()
-        return MBlQuestion(a: a, b: b, op: op, answer: answer, choices: choices)
+        return MathBlitzQuestion(a: a, b: b, op: op, answer: answer, choices: choices)
     }
 }
 
 struct MathBlitzView: View {
-    @State private var phase: MBlGamePhase = .start
+    @State private var phase: MathBlitzPhase = .start
+    @AppStorage("mathBlitzBestScore") private var bestScore: Int = 0
     @State private var score: Int = 0
     @State private var timeLeft: Double = 30
-    @State private var question: MBlQuestion = MBlQuestion.generate(difficulty: 0)
+    @State private var question: MathBlitzQuestion = MathBlitzQuestion.generate(difficulty: 0)
     @State private var difficulty: Int = 0
     @State private var correctCount: Int = 0
     @State private var questionStartTime: Date = Date()
     @State private var feedback: String = ""
     @State private var feedbackColor: Color = .green
-    @State private var timer: Timer? = nil
     @State private var feedbackOpacity: Double = 0
+    @State private var timer: Timer? = nil
+    @State private var recentResults: [Bool] = []
+    @State private var timerInterval: Double = 0.1
+    @State private var selectedChoice: Int? = nil
+
+    let gradient = LinearGradient(
+        colors: [Color(red: 0.1, green: 0.05, blue: 0.3), Color(red: 0.2, green: 0.1, blue: 0.5)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            gradient.ignoresSafeArea()
             switch phase {
             case .start: startScreen
             case .playing: playScreen
@@ -73,67 +83,104 @@ struct MathBlitzView: View {
     }
 
     var startScreen: some View {
-        VStack(spacing: 28) {
-            Text("MathBlitz")
-                .font(.system(size: 44, weight: .black))
-                .foregroundColor(.yellow)
-            Text("Answer fast!\n+10 correct  -5 wrong\nSpeed bonus for quick answers")
-                .multilineTextAlignment(.center)
-                .foregroundColor(.white.opacity(0.8))
-                .font(.subheadline)
+        VStack(spacing: 32) {
+            VStack(spacing: 8) {
+                Text("MathBlitz")
+                    .font(.system(size: 48, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Adaptive Difficulty Mode")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            .padding(28)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.3), lineWidth: 1))
+
+            VStack(spacing: 8) {
+                Text("+10 correct  •  -5 wrong")
+                Text("Speed bonus for quick answers")
+                Text("Difficulty adapts to your skill!")
+            }
+            .font(.footnote)
+            .foregroundColor(.white.opacity(0.8))
+            .multilineTextAlignment(.center)
+
             Button(action: startGame) {
-                Text("START")
+                Text("START GAME")
                     .font(.headline)
-                    .foregroundColor(.black)
-                    .frame(width: 180, height: 52)
-                    .background(Color.yellow)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .foregroundColor(.white)
+                    .frame(width: 200, height: 56)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.5), lineWidth: 1))
             }
         }
         .padding()
     }
 
     var playScreen: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             HStack {
-                Text("Score: \(score)")
-                    .font(.headline).foregroundColor(.yellow)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("SCORE")
+                        .font(.caption).foregroundColor(.white.opacity(0.6))
+                    Text("\(score)")
+                        .font(.title2).bold().foregroundColor(.white)
+                }
                 Spacer()
-                Text(String(format: "⏱ %.1f", timeLeft))
-                    .font(.headline).foregroundColor(timeLeft < 10 ? .red : .white)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("TIME")
+                        .font(.caption).foregroundColor(.white.opacity(0.6))
+                    Text(String(format: "%.1f", timeLeft))
+                        .font(.title2).bold()
+                        .foregroundColor(timeLeft < 10 ? .red : .white)
+                }
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
             .padding(.horizontal)
 
             ProgressView(value: timeLeft, total: 30)
-                .tint(timeLeft < 10 ? .red : .yellow)
+                .tint(.purple)
                 .padding(.horizontal)
+
+            if difficulty > 0 {
+                Text("Level \(difficulty + 1)")
+                    .font(.caption).foregroundColor(.purple.opacity(0.9))
+            }
 
             Spacer()
 
             Text("\(question.a) \(question.op.symbol()) \(question.b) = ?")
-                .font(.system(size: 42, weight: .bold))
+                .font(.system(size: 44, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
-                .padding()
                 .frame(maxWidth: .infinity)
-                .background(Color.white.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .padding(.vertical, 28)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.3), lineWidth: 1))
                 .padding(.horizontal)
 
             Text(feedback)
-                .font(.title2).bold()
+                .font(.title3).bold()
                 .foregroundColor(feedbackColor)
                 .opacity(feedbackOpacity)
-                .frame(height: 32)
+                .frame(height: 28)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 ForEach(question.choices, id: \.self) { choice in
                     Text("\(choice)")
                         .font(.title2).bold()
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 64)
-                        .background(Color.white.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .frame(height: 68)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(selectedChoice == choice ? 0.8 : 0.25), lineWidth: selectedChoice == choice ? 2 : 1))
                         .onTapGesture { handleAnswer(choice) }
                 }
             }
@@ -146,19 +193,32 @@ struct MathBlitzView: View {
 
     var gameOverScreen: some View {
         VStack(spacing: 24) {
-            Text("Time's Up!")
-                .font(.system(size: 36, weight: .black))
-                .foregroundColor(.yellow)
-            Text("Score: \(score)")
-                .font(.largeTitle).bold().foregroundColor(.white)
-            Text("Correct: \(correctCount)")
-                .foregroundColor(.green)
+            VStack(spacing: 12) {
+                Text("Time's Up!")
+                    .font(.system(size: 34, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Final Score")
+                    .font(.caption).foregroundColor(.white.opacity(0.6))
+                Text("\(score)")
+                    .font(.system(size: 56, weight: .black)).foregroundColor(.white)
+                Text("Correct answers: \(correctCount)")
+                    .foregroundColor(.green.opacity(0.9))
+                Text("Max difficulty: Level \(difficulty + 1)")
+                    .font(.caption).foregroundColor(.white.opacity(0.6))
+            }
+            .padding(28)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 24))
+            .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+            .padding(.horizontal)
+
             Button(action: startGame) {
                 Text("PLAY AGAIN")
-                    .font(.headline).foregroundColor(.black)
-                    .frame(width: 180, height: 52)
-                    .background(Color.yellow)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .font(.headline).foregroundColor(.white)
+                    .frame(width: 200, height: 56)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.5), lineWidth: 1))
             }
         }
     }
@@ -168,40 +228,61 @@ struct MathBlitzView: View {
         timeLeft = 30
         correctCount = 0
         difficulty = 0
+        recentResults = []
+        timerInterval = 0.1
+        selectedChoice = nil
         phase = .playing
-        question = MBlQuestion.generate(difficulty: difficulty)
+        question = MathBlitzQuestion.generate(difficulty: difficulty)
         questionStartTime = Date()
         feedback = ""
         feedbackOpacity = 0
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            timeLeft -= 0.1
+        timer = Timer.scheduledTimer(withTimeInterval: timerInterval, repeats: true) { _ in
+            timeLeft -= timerInterval
             if timeLeft <= 0 {
                 timeLeft = 0
                 timer?.invalidate()
+                bestScore = max(bestScore, score)
                 phase = .gameOver
             }
         }
     }
 
+    func checkAdaptiveDifficulty() {
+        guard recentResults.count >= 5 else { return }
+        let last5 = recentResults.suffix(5)
+        let trueCount = last5.filter { $0 }.count
+        if trueCount > 4 {
+            // Bigger numbers, not a faster clock: the countdown stays honest.
+            difficulty = min(difficulty + 1, 6)
+            recentResults = []
+        }
+    }
+
     func handleAnswer(_ choice: Int) {
+        selectedChoice = choice
         let elapsed = Date().timeIntervalSince(questionStartTime)
-        if choice == question.answer {
+        let correct = choice == question.answer
+        recentResults.append(correct)
+        if correct {
             let speedBonus = max(0, Int(5 - elapsed))
             score += 10 + speedBonus
             correctCount += 1
             feedback = "+\(10 + speedBonus)"
             feedbackColor = .green
-            difficulty = correctCount / 3
         } else {
             score -= 5
             feedback = "-5"
             feedbackColor = .red
         }
         feedbackOpacity = 1
-        withAnimation(.easeOut(duration: 0.8)) { feedbackOpacity = 0 }
-        question = MBlQuestion.generate(difficulty: difficulty)
-        questionStartTime = Date()
+        withAnimation(.easeOut(duration: 0.7)) { feedbackOpacity = 0 }
+        checkAdaptiveDifficulty()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            selectedChoice = nil
+            question = MathBlitzQuestion.generate(difficulty: difficulty)
+            questionStartTime = Date()
+        }
     }
 }
 

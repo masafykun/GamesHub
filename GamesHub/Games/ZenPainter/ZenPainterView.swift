@@ -1,194 +1,358 @@
 import SwiftUI
 
-struct ZnPtStroke: Identifiable {
+// MARK: - Patterns
+
+/// The shipped versions were a free-draw canvas with a countdown — no goal and
+/// no result. This keeps the calm brush feel but turns it into a game: trace
+/// the ink pattern as completely and as accurately as you can.
+struct ZenPainterPattern {
+    let name: String
+    /// Points in unit space (0...1); the tracing target.
+    let points: [CGPoint]
+
+    static func circle(turns: Double = 1) -> [CGPoint] {
+        stride(from: 0.0, through: 1.0, by: 0.004).map { t in
+            let a = t * .pi * 2 * turns - .pi / 2
+            return CGPoint(x: 0.5 + cos(a) * 0.34, y: 0.5 + sin(a) * 0.34)
+        }
+    }
+
+    static func spiral() -> [CGPoint] {
+        stride(from: 0.0, through: 1.0, by: 0.003).map { t in
+            let a = t * .pi * 5
+            let r = 0.08 + t * 0.3
+            return CGPoint(x: 0.5 + cos(a) * r, y: 0.5 + sin(a) * r)
+        }
+    }
+
+    static func wave() -> [CGPoint] {
+        stride(from: 0.0, through: 1.0, by: 0.003).map { t in
+            CGPoint(x: 0.1 + t * 0.8, y: 0.5 + sin(t * .pi * 4) * 0.22)
+        }
+    }
+
+    static func star() -> [CGPoint] {
+        var pts: [CGPoint] = []
+        let order = [0, 2, 4, 1, 3, 0]
+        for i in 0..<(order.count - 1) {
+            let a1 = Double(order[i]) * 2 * .pi / 5 - .pi / 2
+            let a2 = Double(order[i + 1]) * 2 * .pi / 5 - .pi / 2
+            let p1 = CGPoint(x: 0.5 + cos(a1) * 0.34, y: 0.5 + sin(a1) * 0.34)
+            let p2 = CGPoint(x: 0.5 + cos(a2) * 0.34, y: 0.5 + sin(a2) * 0.34)
+            for s in stride(from: 0.0, through: 1.0, by: 0.01) {
+                pts.append(CGPoint(x: p1.x + (p2.x - p1.x) * s, y: p1.y + (p2.y - p1.y) * s))
+            }
+        }
+        return pts
+    }
+
+    static func infinity() -> [CGPoint] {
+        stride(from: 0.0, through: 1.0, by: 0.003).map { t in
+            let a = t * .pi * 2
+            return CGPoint(x: 0.5 + sin(a) * 0.33, y: 0.5 + sin(a * 2) * 0.18)
+        }
+    }
+
+    static let all: [ZenPainterPattern] = [
+        ZenPainterPattern(name: "Enso", points: circle()),
+        ZenPainterPattern(name: "Wave", points: wave()),
+        ZenPainterPattern(name: "Spiral", points: spiral()),
+        ZenPainterPattern(name: "Star", points: star()),
+        ZenPainterPattern(name: "Infinity", points: infinity()),
+    ]
+}
+
+struct ZenPainterStroke: Identifiable {
     let id = UUID()
     var points: [CGPoint]
-    var color: Color
-    var lineWidth: CGFloat
+    var hue: Double
 }
 
-enum ZnPtPhase {
-    case start, drawing, complete
-}
+enum ZenPainterPhase { case start, drawing, complete }
+
+// MARK: - View
 
 struct ZenPainterView: View {
-    @State private var phase: ZnPtPhase = .start
-    @State private var strokes: [ZnPtStroke] = []
-    @State private var currentStroke: ZnPtStroke? = nil
-    @State private var hue: Double = 0.0
-    @State private var timeRemaining: Int = 60
+    @State private var phase: ZenPainterPhase = .start
+    @State private var round: Int = 1
+    @State private var patternIndex: Int = 0
+    @State private var covered: Set<Int> = []
+    @State private var strayPoints: Int = 0
+    @State private var totalPoints: Int = 0
+    @State private var strokes: [ZenPainterStroke] = []
+    @State private var currentStroke: ZenPainterStroke? = nil
+    @State private var hue: Double = 0
+    @State private var timeRemaining: Int = 30
     @State private var timer: Timer? = nil
-    @State private var lastPoint: CGPoint? = nil
-    @State private var lastTime: Date = Date()
+    @State private var roundScores: [Int] = []
+    @State private var canvasSize: CGSize = .zero
+
+    @AppStorage("zenPainterBestScore") private var bestScore: Int = 0
+
+    private let totalRounds = 3
+
+    private var pattern: ZenPainterPattern { ZenPainterPattern.all[patternIndex] }
+    private var coverage: Double {
+        pattern.points.isEmpty ? 0 : Double(covered.count) / Double(pattern.points.count)
+    }
+    private var accuracy: Double {
+        totalPoints == 0 ? 1 : max(0, 1 - Double(strayPoints) / Double(totalPoints))
+    }
+    private var roundScore: Int { Int(coverage * 100 * (0.5 + accuracy * 0.5)) }
+    private var runScore: Int { roundScores.reduce(0, +) }
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            LinearGradient(
+                colors: [Color(hue: 0.75, saturation: 0.6, brightness: 0.22),
+                         Color(hue: 0.55, saturation: 0.5, brightness: 0.14)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
 
             switch phase {
-            case .start:
-                startScreen
-            case .drawing:
-                drawingScreen
-            case .complete:
-                completeScreen
+            case .start:    startScreen
+            case .drawing:  drawingScreen
+            case .complete: completeScreen
             }
         }
+        .onDisappear { timer?.invalidate() }
+        .preferredColorScheme(.dark)
     }
 
-    var startScreen: some View {
-        VStack(spacing: 24) {
-            Text("ZenPainter")
+    // MARK: Screens
+
+    private var startScreen: some View {
+        VStack(spacing: 26) {
+            Text("Zen Painter")
                 .font(.system(size: 42, weight: .thin, design: .serif))
                 .foregroundColor(.white)
-            Text("Draw freely.\nColors flow as you create.")
-                .font(.body)
-                .multilineTextAlignment(.center)
-                .foregroundColor(.gray)
-            Button(action: startSession) {
+
+            VStack(spacing: 10) {
+                Text("Trace the ink pattern with one calm stroke.")
+                    .foregroundColor(.white.opacity(0.85))
+                Text("Coverage fills the score, straying from the line costs accuracy.")
+                    .font(.footnote)
+                    .foregroundColor(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                if bestScore > 0 {
+                    Text("Best: \(bestScore)")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.6))
+                }
+            }
+            .padding(22)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+
+            Button(action: startRun) {
                 Text("Begin")
-                    .font(.title2)
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 48)
+                    .font(.title3.weight(.medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 46)
                     .padding(.vertical, 14)
-                    .background(Color.white)
-                    .clipShape(Capsule())
+                    .background(Capsule().fill(Color.white.opacity(0.16)))
+                    .overlay(Capsule().stroke(.white.opacity(0.4), lineWidth: 1))
             }
         }
-        .padding()
+        .padding(30)
     }
 
-    var drawingScreen: some View {
-        ZStack(alignment: .top) {
-            canvasView
+    private var drawingScreen: some View {
+        VStack(spacing: 12) {
             HStack {
-                Text("\(timeRemaining)s")
-                    .font(.system(size: 18, weight: .light, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.7))
+                label("ROUND", "\(round)/\(totalRounds)")
                 Spacer()
-                Text("\(strokes.count) strokes")
-                    .font(.system(size: 14, weight: .light))
-                    .foregroundColor(.white.opacity(0.5))
+                label("PATTERN", pattern.name)
                 Spacer()
-                Button("Clear") {
-                    resetSession()
-                }
-                .font(.system(size: 16, weight: .light))
-                .foregroundColor(.white.opacity(0.6))
+                label("TRACED", "\(Int(coverage * 100))%")
+                Spacer()
+                label("TIME", "\(timeRemaining)s")
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
-        }
-    }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal, 12)
 
-    var canvasView: some View {
-        Canvas { context, size in
-            for stroke in strokes {
-                guard stroke.points.count > 1 else { continue }
-                var path = Path()
-                path.move(to: stroke.points[0])
-                for pt in stroke.points.dropFirst() {
-                    path.addLine(to: pt)
-                }
-                context.stroke(path, with: .color(stroke.color), style: StrokeStyle(lineWidth: stroke.lineWidth, lineCap: .round, lineJoin: .round))
-            }
-            if let s = currentStroke, s.points.count > 1 {
-                var path = Path()
-                path.move(to: s.points[0])
-                for pt in s.points.dropFirst() {
-                    path.addLine(to: pt)
-                }
-                context.stroke(path, with: .color(s.color), style: StrokeStyle(lineWidth: s.lineWidth, lineCap: .round, lineJoin: .round))
-            }
-        }
-        .background(Color.black)
-        .gesture(DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                let now = Date()
-                let dt = now.timeIntervalSince(lastTime)
-                let speed: Double
-                if let lp = lastPoint {
-                    let dx = value.location.x - lp.x
-                    let dy = value.location.y - lp.y
-                    let dist = sqrt(dx*dx + dy*dy)
-                    speed = dt > 0 ? dist / dt : 0
-                } else {
-                    speed = 0
-                }
-                let lineWidth = max(2.0, min(14.0, 14.0 - speed * 0.04))
-                hue = fmod(hue + 0.003, 1.0)
-                let color = Color(hue: hue, saturation: 0.85, brightness: 0.95)
+            GeometryReader { geo in
+                ZStack {
+                    Canvas { ctx, size in
+                        // Target pattern: faint where untraced, glowing where traced.
+                        for (i, p) in pattern.points.enumerated() {
+                            let pt = CGPoint(x: p.x * size.width, y: p.y * size.height)
+                            let rect = CGRect(x: pt.x - 3, y: pt.y - 3, width: 6, height: 6)
+                            let done = covered.contains(i)
+                            ctx.fill(
+                                Path(ellipseIn: rect),
+                                with: .color(done
+                                             ? Color(hue: 0.5, saturation: 0.5, brightness: 1).opacity(0.9)
+                                             : Color.white.opacity(0.13))
+                            )
+                        }
 
-                if value.translation == .zero {
-                    currentStroke = ZnPtStroke(points: [value.location], color: color, lineWidth: lineWidth)
-                } else {
-                    if currentStroke != nil {
-                        currentStroke!.points.append(value.location)
+                        for stroke in strokes + (currentStroke.map { [$0] } ?? []) {
+                            guard stroke.points.count > 1 else { continue }
+                            var path = Path()
+                            path.move(to: stroke.points[0])
+                            for p in stroke.points.dropFirst() { path.addLine(to: p) }
+                            ctx.stroke(
+                                path,
+                                with: .color(Color(hue: stroke.hue, saturation: 0.55, brightness: 1).opacity(0.75)),
+                                style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round)
+                            )
+                        }
                     }
+                    .background(Color.white.opacity(0.03))
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in handleDraw(value.location, in: geo.size) }
+                            .onEnded { _ in
+                                if let stroke = currentStroke { strokes.append(stroke) }
+                                currentStroke = nil
+                            }
+                    )
                 }
-                lastPoint = value.location
-                lastTime = now
+                .onAppear { canvasSize = geo.size }
             }
-            .onEnded { _ in
-                if let s = currentStroke {
-                    strokes.append(s)
-                    currentStroke = nil
-                }
-                lastPoint = nil
-            }
-        )
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .padding(.horizontal, 12)
+            .padding(.bottom, 10)
+        }
     }
 
-    var completeScreen: some View {
-        VStack(spacing: 28) {
-            Text("Artwork Complete")
-                .font(.system(size: 36, weight: .thin, design: .serif))
+    private var completeScreen: some View {
+        VStack(spacing: 22) {
+            Text(round > totalRounds ? "Session Complete" : "Round \(round)")
+                .font(.system(size: 30, weight: .thin, design: .serif))
                 .foregroundColor(.white)
-            Text("\(strokes.count)")
-                .font(.system(size: 72, weight: .ultraLight, design: .monospaced))
-                .foregroundColor(.white)
-            Text("strokes")
-                .font(.title3)
-                .foregroundColor(.gray)
-            Button(action: resetSession) {
-                Text("New Canvas")
-                    .font(.title2)
-                    .foregroundColor(.black)
+
+            VStack(spacing: 10) {
+                statRow("Traced", "\(Int(coverage * 100))%")
+                statRow("Accuracy", "\(Int(accuracy * 100))%")
+                statRow("Round score", "\(roundScore)")
+                statRow("Run total", "\(runScore)")
+                statRow("Best", "\(bestScore)")
+            }
+            .padding(22)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+
+            Button(action: advance) {
+                Text(round > totalRounds ? "Paint Again" : "Next Pattern")
+                    .font(.title3.weight(.medium))
+                    .foregroundColor(.white)
                     .padding(.horizontal, 40)
                     .padding(.vertical, 14)
-                    .background(Color.white)
-                    .clipShape(Capsule())
+                    .background(Capsule().fill(Color.white.opacity(0.16)))
+                    .overlay(Capsule().stroke(.white.opacity(0.4), lineWidth: 1))
             }
         }
-        .padding()
+        .padding(30)
     }
 
-    func startSession() {
+    private func label(_ title: String, _ value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(.white.opacity(0.5))
+            Text(value)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundColor(.white)
+        }
+    }
+
+    private func statRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).foregroundColor(.white.opacity(0.65))
+            Spacer()
+            Text(value).foregroundColor(.white).bold()
+        }
+        .font(.subheadline)
+        .frame(width: 220)
+    }
+
+    // MARK: Flow
+
+    private func startRun() {
+        round = 1
+        roundScores = []
+        beginRound(patternIndex: Int.random(in: 0..<ZenPainterPattern.all.count))
+    }
+
+    private func beginRound(patternIndex index: Int) {
+        patternIndex = index
+        covered = []
+        strayPoints = 0
+        totalPoints = 0
         strokes = []
         currentStroke = nil
-        hue = 0.0
-        timeRemaining = 60
+        hue = Double.random(in: 0...1)
+        timeRemaining = 30
         phase = .drawing
+
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             if timeRemaining > 1 {
                 timeRemaining -= 1
             } else {
                 timeRemaining = 0
-                timer?.invalidate()
-                phase = .complete
+                finishRound()
             }
         }
     }
 
-    func resetSession() {
+    private func finishRound() {
         timer?.invalidate()
-        strokes = []
-        currentStroke = nil
-        hue = 0.0
-        timeRemaining = 60
-        phase = .start
+        timer = nil
+        roundScores.append(roundScore)
+        bestScore = max(bestScore, runScore)
+        phase = .complete
+    }
+
+    private func advance() {
+        if round >= totalRounds {
+            startRun()
+        } else {
+            round += 1
+            let next = (patternIndex + Int.random(in: 1..<ZenPainterPattern.all.count)) % ZenPainterPattern.all.count
+            beginRound(patternIndex: next)
+        }
+    }
+
+    // MARK: Drawing
+
+    private func handleDraw(_ location: CGPoint, in size: CGSize) {
+        guard phase == .drawing else { return }
+
+        if currentStroke == nil {
+            currentStroke = ZenPainterStroke(points: [location], hue: hue)
+        } else {
+            currentStroke?.points.append(location)
+        }
+        hue = (hue + 0.004).truncatingRemainder(dividingBy: 1)
+
+        totalPoints += 1
+
+        // Mark every target sample within the brush radius as traced.
+        let tolerance: CGFloat = 26
+        var hit = false
+        for (i, p) in pattern.points.enumerated() {
+            let pt = CGPoint(x: p.x * size.width, y: p.y * size.height)
+            if abs(pt.x - location.x) < tolerance && abs(pt.y - location.y) < tolerance {
+                let dx = pt.x - location.x
+                let dy = pt.y - location.y
+                if dx * dx + dy * dy < tolerance * tolerance {
+                    covered.insert(i)
+                    hit = true
+                }
+            }
+        }
+        if !hit { strayPoints += 1 }
+
+        if coverage >= 0.98 { finishRound() }
     }
 }
 
-#Preview { ZenPainterView() }
+#Preview {
+    ZenPainterView()
+}

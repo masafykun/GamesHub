@@ -1,54 +1,59 @@
 import SwiftUI
 
-// MARK: - Models
+// MARK: - Models 
 
-enum MgBMagnetType { case attractive, repulsive }
+enum MagnetBallMagnetType { case attractive, repulsive }
 
-struct MgBMagnet: Identifiable {
+struct MagnetBallMagnet: Identifiable {
     let id = UUID()
     var gridCol: Int
     var gridRow: Int
-    var type: MgBMagnetType
+    var type: MagnetBallMagnetType
 }
 
-struct MgBLevel {
+struct MagnetBallLevel {
     let cols: Int
     let rows: Int
-    let coins: [CGPoint]   // grid coords
+    let coins: [CGPoint]
     let exit: CGPoint
     let ballStart: CGPoint
 }
 
-// MARK: - Game State
+enum MagnetBallPhase { case start, playing, won, lost }
 
-enum MgBPhase { case start, playing, won, lost }
+// MARK: - MagnetBallView
 
 struct MagnetBallView: View {
 
-    static let levels: [MgBLevel] = [
-        MgBLevel(cols: 6, rows: 8, coins: [CGPoint(x:2,y:2),CGPoint(x:4,y:5)], exit: CGPoint(x:5,y:7), ballStart: CGPoint(x:0,y:0)),
-        MgBLevel(cols: 6, rows: 8, coins: [CGPoint(x:1,y:3),CGPoint(x:3,y:1),CGPoint(x:5,y:4)], exit: CGPoint(x:5,y:7), ballStart: CGPoint(x:0,y:7)),
-        MgBLevel(cols: 7, rows: 9, coins: [CGPoint(x:2,y:2),CGPoint(x:4,y:4),CGPoint(x:6,y:6)], exit: CGPoint(x:6,y:8), ballStart: CGPoint(x:0,y:0)),
-        MgBLevel(cols: 7, rows: 9, coins: [CGPoint(x:1,y:1),CGPoint(x:3,y:3),CGPoint(x:5,y:5),CGPoint(x:6,y:2)], exit: CGPoint(x:6,y:8), ballStart: CGPoint(x:0,y:8)),
+    static let levels: [MagnetBallLevel] = [
+        MagnetBallLevel(cols: 6, rows: 8, coins: [CGPoint(x:2,y:2),CGPoint(x:4,y:5)], exit: CGPoint(x:5,y:7), ballStart: CGPoint(x:0,y:0)),
+        MagnetBallLevel(cols: 6, rows: 8, coins: [CGPoint(x:1,y:3),CGPoint(x:3,y:1),CGPoint(x:5,y:4)], exit: CGPoint(x:5,y:7), ballStart: CGPoint(x:0,y:7)),
+        MagnetBallLevel(cols: 7, rows: 9, coins: [CGPoint(x:2,y:2),CGPoint(x:4,y:4),CGPoint(x:6,y:6)], exit: CGPoint(x:6,y:8), ballStart: CGPoint(x:0,y:0)),
+        MagnetBallLevel(cols: 7, rows: 9, coins: [CGPoint(x:1,y:1),CGPoint(x:3,y:3),CGPoint(x:5,y:5),CGPoint(x:6,y:2)], exit: CGPoint(x:6,y:8), ballStart: CGPoint(x:0,y:8)),
     ]
 
-    @State private var phase: MgBPhase = .start
+    @State private var phase: MagnetBallPhase = .start
     @State private var levelIndex: Int = 0
-    @State private var magnets: [MgBMagnet] = []
+    @State private var magnets: [MagnetBallMagnet] = []
     @State private var ballPos: CGPoint = .zero
     @State private var ballVel: CGPoint = .zero
     @State private var collectedCoins: Set<Int> = []
     @State private var score: Int = 0
-    @State private var timer: Timer? = nil
+    @State private var gameTimer: Timer? = nil
     @State private var boardSize: CGSize = .zero
+    @State private var recentResults: [Bool] = []
+    @State private var difficultyMult: Double = 1.0
 
-    var level: MgBLevel { Self.levels[levelIndex] }
+    var level: MagnetBallLevel { Self.levels[levelIndex] }
     var cellW: CGFloat { boardSize.width / CGFloat(level.cols) }
     var cellH: CGFloat { boardSize.height / CGFloat(level.rows) }
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            LinearGradient(colors: [Color(red: 0.05, green: 0.05, blue: 0.25), Color(red: 0.15, green: 0.05, blue: 0.35)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
+
             switch phase {
             case .start: startScreen
             case .playing: gameScreen
@@ -62,110 +67,177 @@ struct MagnetBallView: View {
     // MARK: Start Screen
 
     var startScreen: some View {
-        VStack(spacing: 24) {
-            Text("MagnetBall").font(.largeTitle.bold())
-            Text("Tap grid: Blue = attract, Red = repel, tap again to remove.\nGuide the ball to collect coins and reach the exit.")
-                .multilineTextAlignment(.center).font(.footnote).foregroundColor(.gray)
-                .padding(.horizontal)
-            Button("Play") { startLevel(0) }
-                .font(.title2.bold())
-                .padding(.horizontal, 40).padding(.vertical, 12)
-                .background(Color.blue).clipShape(Capsule())
+        VStack(spacing: 28) {
+            VStack(spacing: 8) {
+                Text("MagnetBall").font(.system(size: 36, weight: .bold, design: .rounded))
+                Text("Tap grid to place magnets.\nBlue pulls, Red pushes.\nCollect coins, reach the star!").font(.subheadline)
+                    .multilineTextAlignment(.center).foregroundColor(.white.opacity(0.7))
+            }
+            .padding(28)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.3), lineWidth: 1))
+            .padding(.horizontal, 24)
+
+            Button("Start Game") { startLevel(0) }
+                .font(.title3.bold())
+                .padding(.horizontal, 40).padding(.vertical, 14)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.4), lineWidth: 1))
         }
     }
 
     // MARK: Game Screen
 
     var gameScreen: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             HStack {
-                Text("Level \(levelIndex+1)/\(Self.levels.count)").font(.headline)
+                infoChip("Level \(levelIndex+1)/\(Self.levels.count)")
                 Spacer()
-                Text("Score: \(score)").font(.headline)
+                if difficultyMult > 1.05 {
+                    infoChip("Speed x\(String(format: "%.1f", difficultyMult))")
+                        .foregroundColor(.orange)
+                }
+                Spacer()
+                infoChip("Score: \(score)")
             }.padding(.horizontal)
 
             GeometryReader { geo in
-                let size = geo.size
                 ZStack {
-                    // Grid background
+                    // Grid
                     ForEach(0..<level.rows, id: \.self) { r in
                         ForEach(0..<level.cols, id: \.self) { c in
                             Rectangle()
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
+                                .stroke(.white.opacity(0.12), lineWidth: 0.5)
                                 .frame(width: cellW, height: cellH)
-                                .position(cellCenter(c, r, size))
+                                .position(cellCenter(c, r, geo.size))
                         }
                     }
                     // Coins
                     ForEach(Array(level.coins.enumerated()), id: \.offset) { idx, coin in
                         if !collectedCoins.contains(idx) {
-                            Image(systemName: "circle.fill")
-                                .foregroundColor(.yellow)
-                                .font(.system(size: cellW * 0.5))
-                                .position(cellCenter(Int(coin.x), Int(coin.y), size))
+                            Circle()
+                                .fill(LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom))
+                                .frame(width: cellW * 0.45, height: cellH * 0.45)
+                                .shadow(color: .yellow.opacity(0.6), radius: 6)
+                                .position(cellCenter(Int(coin.x), Int(coin.y), geo.size))
                         }
                     }
-                    // Exit
+                    // Exit star
                     Image(systemName: "star.fill")
-                        .foregroundColor(.green)
+                        .foregroundStyle(LinearGradient(colors: [.green, .teal], startPoint: .top, endPoint: .bottom))
                         .font(.system(size: cellW * 0.6))
-                        .position(cellCenter(Int(level.exit.x), Int(level.exit.y), size))
+                        .shadow(color: .green.opacity(0.8), radius: 8)
+                        .position(cellCenter(Int(level.exit.x), Int(level.exit.y), geo.size))
                     // Magnets
                     ForEach(magnets) { m in
-                        Circle()
-                            .fill(m.type == .attractive ? Color.blue.opacity(0.8) : Color.red.opacity(0.8))
-                            .frame(width: cellW * 0.7, height: cellH * 0.7)
-                            .overlay(Text(m.type == .attractive ? "+" : "−").font(.caption.bold()).foregroundColor(.white))
-                            .position(cellCenter(m.gridCol, m.gridRow, size))
+                        ZStack {
+                            Circle()
+                                .fill(m.type == .attractive ?
+                                      LinearGradient(colors: [.blue, Color(red:0.2,green:0.4,blue:1)], startPoint: .top, endPoint: .bottom) :
+                                      LinearGradient(colors: [.red, Color(red:1,green:0.3,blue:0.2)], startPoint: .top, endPoint: .bottom))
+                                .frame(width: cellW * 0.72, height: cellH * 0.72)
+                            Text(m.type == .attractive ? "+" : "−").font(.caption.bold()).foregroundColor(.white)
+                        }
+                        .shadow(color: m.type == .attractive ? .blue.opacity(0.7) : .red.opacity(0.7), radius: 6)
+                        .position(cellCenter(m.gridCol, m.gridRow, geo.size))
                     }
                     // Ball
                     Circle()
-                        .fill(Color.white)
+                        .fill(RadialGradient(colors: [.white, Color(white: 0.7)], center: .topLeading, startRadius: 0, endRadius: cellW * 0.3))
                         .frame(width: cellW * 0.55, height: cellH * 0.55)
-                        .shadow(color: .white.opacity(0.8), radius: 6)
+                        .shadow(color: .white.opacity(0.9), radius: 8)
                         .position(x: ballPos.x * cellW + cellW / 2,
                                   y: ballPos.y * cellH + cellH / 2)
                 }
                 .contentShape(Rectangle())
-                .onTapGesture { location in
-                    let c = Int(location.x / cellW)
-                    let r = Int(location.y / cellH)
-                    tapCell(c, r)
+                .onTapGesture { loc in
+                    tapCell(Int(loc.x / cellW), Int(loc.y / cellH))
                 }
                 .onAppear {
-                    boardSize = size
-                    resetBall(size)
+                    boardSize = geo.size
+                    resetBall()
                 }
             }
 
             HStack {
                 Button("Restart") { startLevel(levelIndex) }
-                    .padding(.horizontal, 20).padding(.vertical, 8)
-                    .background(Color.gray.opacity(0.3)).clipShape(Capsule())
+                    .font(.callout.bold())
+                    .padding(.horizontal, 18).padding(.vertical, 8)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
                 Spacer()
-                Button(phase == .playing ? "Run Ball" : "") { }
-                    .hidden()
+                Button("Menu") { phase = .start; gameTimer?.invalidate() }
+                    .font(.callout.bold())
+                    .padding(.horizontal, 18).padding(.vertical, 8)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
             }.padding(.horizontal)
         }.padding(.top)
     }
 
+    func infoChip(_ text: String) -> some View {
+        Text(text).font(.callout.bold())
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
+    }
+
     func resultScreen(won: Bool) -> some View {
-        VStack(spacing: 20) {
-            Text(won ? "Level Complete!" : "Try Again").font(.largeTitle.bold())
-            Text("Score: \(score)").font(.title2)
-            HStack(spacing: 16) {
-                if won && levelIndex + 1 < Self.levels.count {
-                    Button("Next Level") { startLevel(levelIndex + 1) }
-                        .padding(.horizontal, 24).padding(.vertical, 10)
-                        .background(Color.green).clipShape(Capsule())
+        VStack(spacing: 22) {
+            VStack(spacing: 10) {
+                Text(won ? "Level Complete!" : "Try Again").font(.system(size: 30, weight: .bold, design: .rounded))
+                Text("Score: \(score)").font(.title3)
+                if difficultyMult > 1.05 {
+                    Text("Difficulty: x\(String(format: "%.1f", difficultyMult))").font(.callout).foregroundColor(.orange)
                 }
-                Button("Restart") { startLevel(levelIndex) }
-                    .padding(.horizontal, 24).padding(.vertical, 10)
-                    .background(Color.blue).clipShape(Capsule())
-                Button("Menu") { phase = .start; timer?.invalidate() }
-                    .padding(.horizontal, 24).padding(.vertical, 10)
-                    .background(Color.gray.opacity(0.4)).clipShape(Capsule())
             }
+            .padding(28)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.3), lineWidth: 1))
+
+            HStack(spacing: 12) {
+                if won && levelIndex + 1 < Self.levels.count {
+                    Button("Next Level") {
+                        recentResults.append(true)
+                        updateDifficulty()
+                        startLevel(levelIndex + 1)
+                    }
+                    .padding(.horizontal, 20).padding(.vertical, 10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.green.opacity(0.6), lineWidth: 1))
+                }
+                Button("Restart") {
+                    recentResults.append(false)
+                    startLevel(levelIndex)
+                }
+                .padding(.horizontal, 20).padding(.vertical, 10)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
+
+                Button("Menu") { phase = .start }
+                    .padding(.horizontal, 20).padding(.vertical, 10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
+            }
+        }.padding(.horizontal)
+    }
+
+    // MARK: Adaptive Difficulty
+
+    func updateDifficulty() {
+        let last5 = Array(recentResults.suffix(5))
+        let wins = last5.filter { $0 }.count
+        if last5.count == 5 && wins > 4 {
+            difficultyMult = min(difficultyMult * 1.2, 3.0)
         }
     }
 
@@ -178,39 +250,36 @@ struct MagnetBallView: View {
     }
 
     func tapCell(_ c: Int, _ r: Int) {
+        guard c >= 0 && c < level.cols && r >= 0 && r < level.rows else { return }
         if let idx = magnets.firstIndex(where: { $0.gridCol == c && $0.gridRow == r }) {
-            let m = magnets[idx]
-            if m.type == .attractive { magnets[idx].type = .repulsive }
+            if magnets[idx].type == .attractive { magnets[idx].type = .repulsive }
             else { magnets.remove(at: idx) }
         } else {
-            magnets.append(MgBMagnet(gridCol: c, gridRow: r, type: .attractive))
+            magnets.append(MagnetBallMagnet(gridCol: c, gridRow: r, type: .attractive))
         }
     }
 
     func startLevel(_ idx: Int) {
-        timer?.invalidate()
+        gameTimer?.invalidate()
         levelIndex = idx
         magnets = []
         collectedCoins = []
         if idx == 0 { score = 0 }
         phase = .playing
-        boardSize = boardSize == .zero ? CGSize(width: 300, height: 400) : boardSize
-        resetBall(boardSize)
-        startTimer()
+        if boardSize == .zero { boardSize = CGSize(width: 300, height: 400) }
+        resetBall()
+        gameTimer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in update() }
     }
 
-    func resetBall(_ size: CGSize) {
+    func resetBall() {
         ballPos = CGPoint(x: level.ballStart.x, y: level.ballStart.y)
-        ballVel = CGPoint(x: 0.03, y: 0.02)
-    }
-
-    func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in update() }
+        ballVel = CGPoint(x: 0.04, y: 0.03)
     }
 
     func update() {
         guard phase == .playing else { return }
         let k: CGFloat = 0.3
+        let dt: CGFloat = CGFloat(0.016 * difficultyMult)
         var ax: CGFloat = 0; var ay: CGFloat = 0
         for m in magnets {
             let mx = CGFloat(m.gridCol) + 0.5
@@ -218,24 +287,23 @@ struct MagnetBallView: View {
             let dx = mx - (ballPos.x + 0.5)
             let dy = my - (ballPos.y + 0.5)
             let r2 = max(dx*dx + dy*dy, 0.1)
+            let r = sqrt(r2)
             let f = k / r2
             let sign: CGFloat = m.type == .attractive ? 1 : -1
-            ax += sign * f * dx / sqrt(r2)
-            ay += sign * f * dy / sqrt(r2)
+            ax += sign * f * dx / r
+            ay += sign * f * dy / r
         }
-        ballVel.x += ax * 0.016
-        ballVel.y += ay * 0.016
-        let maxV: CGFloat = 3.0
+        ballVel.x = (ballVel.x + ax * dt) * 0.999
+        ballVel.y = (ballVel.y + ay * dt) * 0.999
+        let maxV: CGFloat = CGFloat(4.0 * difficultyMult)
         let spd = sqrt(ballVel.x*ballVel.x + ballVel.y*ballVel.y)
         if spd > maxV { ballVel.x = ballVel.x/spd*maxV; ballVel.y = ballVel.y/spd*maxV }
-        ballPos.x += ballVel.x * 0.016
-        ballPos.y += ballVel.y * 0.016
-        // Bounce off walls
+        ballPos.x += ballVel.x * dt
+        ballPos.y += ballVel.y * dt
         if ballPos.x < 0 { ballPos.x = 0; ballVel.x = abs(ballVel.x) }
         if ballPos.y < 0 { ballPos.y = 0; ballVel.y = abs(ballVel.y) }
         if ballPos.x > CGFloat(level.cols) - 1 { ballPos.x = CGFloat(level.cols) - 1; ballVel.x = -abs(ballVel.x) }
         if ballPos.y > CGFloat(level.rows) - 1 { ballPos.y = CGFloat(level.rows) - 1; ballVel.y = -abs(ballVel.y) }
-        // Check coins
         for (idx, coin) in level.coins.enumerated() {
             if !collectedCoins.contains(idx) {
                 let dx = (ballPos.x + 0.5) - (coin.x + 0.5)
@@ -243,15 +311,13 @@ struct MagnetBallView: View {
                 if dx*dx + dy*dy < 0.5 { collectedCoins.insert(idx); score += 10 }
             }
         }
-        // Check exit
         let ex = level.exit.x; let ey = level.exit.y
-        let ddx = (ballPos.x + 0.5) - (ex + 0.5)
-        let ddy = (ballPos.y + 0.5) - (ey + 0.5)
-        if ddx*ddx + ddy*ddy < 0.5 {
-            score += 50
-            timer?.invalidate()
-            if levelIndex + 1 < Self.levels.count { phase = .won }
-            else { phase = .won }
+        let dx = (ballPos.x + 0.5) - (ex + 0.5)
+        let dy = (ballPos.y + 0.5) - (ey + 0.5)
+        if dx*dx + dy*dy < 0.5 {
+            score += 50 + collectedCoins.count * 5
+            gameTimer?.invalidate()
+            phase = .won
         }
     }
 }

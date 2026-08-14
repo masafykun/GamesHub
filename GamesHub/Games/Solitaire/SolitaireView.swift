@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Models (file-scoped, private)
+// MARK: - Models (, file-scoped)
 
 private struct SolitaireCard: Identifiable, Equatable {
     let id = UUID()
@@ -82,20 +82,16 @@ private class SolitaireGame: ObservableObject {
 
     func tapTableau(col: Int) {
         guard !tableau[col].isEmpty else {
-            // Try to place selected card here
             if let src = selectedSource {
                 tryMove(to: col, fromSource: src)
             }
             return
         }
-
-        // If tapping face-down top card, flip it
         if let last = tableau[col].last, !last.isFaceUp {
             tableau[col][tableau[col].count - 1].isFaceUp = true
             moves += 1
             return
         }
-
         if let src = selectedSource {
             if src == .tableau(col) {
                 selectedSource = nil
@@ -111,17 +107,13 @@ private class SolitaireGame: ObservableObject {
         guard let src = selectedSource else { return }
         let card: SolitaireCard?
         switch src {
-        case .waste:
-            card = waste.last
-        case .tableau(let col):
-            card = tableau[col].last
+        case .waste: card = waste.last
+        case .tableau(let col): card = tableau[col].last
         }
         guard let c = card else { return }
-
         if canPlaceOnFoundation(card: c, foundIdx: foundIdx) {
             switch src {
-            case .waste:
-                waste.removeLast()
+            case .waste: waste.removeLast()
             case .tableau(let col):
                 tableau[col].removeLast()
                 flipTopTableau(col: col)
@@ -149,7 +141,6 @@ private class SolitaireGame: ObservableObject {
             }
         case .tableau(let srcCol):
             guard srcCol != destCol else { selectedSource = nil; return }
-            // Find the first face-up card in srcCol to move as a stack
             let faceUpStart = tableau[srcCol].firstIndex(where: { $0.isFaceUp }) ?? (tableau[srcCol].count - 1)
             let stack = Array(tableau[srcCol][faceUpStart...])
             if let topCard = stack.first, canPlaceOnTableau(card: topCard, col: destCol) {
@@ -166,18 +157,14 @@ private class SolitaireGame: ObservableObject {
     }
 
     private func canPlaceOnTableau(card: SolitaireCard, col: Int) -> Bool {
-        if tableau[col].isEmpty {
-            return card.rankValue == 13 // King
-        }
+        if tableau[col].isEmpty { return card.rankValue == 13 }
         guard let top = tableau[col].last, top.isFaceUp else { return false }
         return top.rankValue == card.rankValue + 1 && top.isRed != card.isRed
     }
 
     private func canPlaceOnFoundation(card: SolitaireCard, foundIdx: Int) -> Bool {
         let pile = foundations[foundIdx]
-        if pile.isEmpty {
-            return card.rankValue == 1
-        }
+        if pile.isEmpty { return card.rankValue == 1 }
         guard let top = pile.last else { return false }
         return top.suit == card.suit && top.rankValue == card.rankValue - 1
     }
@@ -185,9 +172,7 @@ private class SolitaireGame: ObservableObject {
     private func flipTopTableau(col: Int) {
         guard !tableau[col].isEmpty else { return }
         let last = tableau[col].count - 1
-        if !tableau[col][last].isFaceUp {
-            tableau[col][last].isFaceUp = true
-        }
+        if !tableau[col][last].isFaceUp { tableau[col][last].isFaceUp = true }
     }
 
     private func autoMoveAces() {
@@ -230,26 +215,40 @@ private class SolitaireGame: ObservableObject {
     }
 }
 
-// MARK: - Card Views
+// MARK: - Card Views (Glassmorphism)
 
 private struct SolitaireCardView: View {
     let card: SolitaireCard
     let isSelected: Bool
 
+    private var glowColor: Color {
+        isSelected ? .cyan : (card.isRed ? .pink : .blue)
+    }
+
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(isSelected ? Color.blue : Color.gray.opacity(0.4), lineWidth: isSelected ? 2.5 : 1)
-                )
             if card.isFaceUp {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.6), Color.white.opacity(0.1)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: isSelected ? 2.5 : 1
+                            )
+                    )
+                    .shadow(color: glowColor.opacity(isSelected ? 0.7 : 0.3), radius: isSelected ? 14 : 6)
+
                 VStack {
                     HStack {
                         VStack(alignment: .leading, spacing: 0) {
                             Text(card.rank)
                                 .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(card.isRed ? Color(red: 1, green: 0.35, blue: 0.45) : .white)
                             Text(card.suit)
                                 .font(.system(size: 11))
                         }
@@ -257,7 +256,8 @@ private struct SolitaireCardView: View {
                     }
                     Spacer()
                     Text(card.suit)
-                        .font(.system(size: 24))
+                        .font(.system(size: 26))
+                        .shadow(color: glowColor.opacity(0.6), radius: 8)
                     Spacer()
                     HStack {
                         Spacer()
@@ -266,77 +266,145 @@ private struct SolitaireCardView: View {
                                 .font(.system(size: 11))
                             Text(card.rank)
                                 .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(card.isRed ? Color(red: 1, green: 0.35, blue: 0.45) : .white)
                         }
                         .rotationEffect(.degrees(180))
                     }
                 }
-                .padding(4)
-                .foregroundColor(card.isRed ? .red : .black)
+                .padding(5)
             } else {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: 10)
                     .fill(
                         LinearGradient(
-                            colors: [Color.blue.opacity(0.8), Color.indigo.opacity(0.9)],
+                            colors: [
+                                Color(red: 0.1, green: 0.15, blue: 0.4),
+                                Color(red: 0.2, green: 0.1, blue: 0.35)
+                            ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .padding(3)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    )
+                ZStack {
+                    ForEach(0..<3, id: \.self) { i in
+                        RoundedRectangle(cornerRadius: 6 - CGFloat(i))
+                            .stroke(Color.white.opacity(0.05 + Double(i) * 0.03), lineWidth: 1)
+                            .padding(CGFloat(i * 5 + 4))
+                    }
+                }
+                Text("✦")
+                    .font(.system(size: 20))
+                    .foregroundColor(.white.opacity(0.3))
             }
         }
-        .frame(width: 60, height: 90)
-        .shadow(color: .black.opacity(0.15), radius: 3, x: 1, y: 2)
+        .frame(width: 52, height: 78)
     }
 }
 
-private struct EmptySlotView: View {
+private struct SolitaireEmptySlot: View {
+    var label: String = ""
     var body: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .stroke(Color.white.opacity(0.3), lineWidth: 1.5)
-            .frame(width: 60, height: 90)
+        ZStack {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1.5)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.white.opacity(0.04))
+                )
+            if !label.isEmpty {
+                Text(label)
+                    .font(.system(size: 22))
+                    .opacity(0.3)
+            }
+        }
+        .frame(width: 52, height: 78)
     }
 }
 
-// MARK: - Main View
+// MARK: - Main View 
 
 struct SolitaireView: View {
     @StateObject private var game = SolitaireGame()
 
+    private let bgGradient = LinearGradient(
+        colors: [
+            Color(red: 0.05, green: 0.05, blue: 0.18),
+            Color(red: 0.1, green: 0.05, blue: 0.25),
+            Color(red: 0.05, green: 0.08, blue: 0.2)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+            bgGradient.ignoresSafeArea()
+
+            // Ambient glow blobs
+            Circle()
+                .fill(Color.purple.opacity(0.12))
+                .frame(width: 300, height: 300)
+                .blur(radius: 80)
+                .offset(x: -80, y: -200)
+            Circle()
+                .fill(Color.blue.opacity(0.1))
+                .frame(width: 250, height: 250)
+                .blur(radius: 80)
+                .offset(x: 100, y: 100)
 
             VStack(spacing: 0) {
-                // Header
+                // Header glass pill
                 HStack {
-                    Text("Solitaire")
-                        .font(.headline)
-                        .fontWeight(.bold)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("SOLITAIRE")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .tracking(3)
+                        Text("Moves: \(game.moves)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
                     Spacer()
-                    Text("Moves: \(game.moves)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Button("New") { game.newGame() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    Button(action: { game.newGame() }) {
+                        Text("New Game")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(
+                                Capsule()
+                                    .fill(.ultraThinMaterial)
+                                    .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                            )
+                            .shadow(color: .cyan.opacity(0.3), radius: 8)
+                    }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 0)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            Rectangle()
+                                .frame(height: 1)
+                                .foregroundColor(.white.opacity(0.1)),
+                            alignment: .bottom
+                        )
+                )
 
-                ScrollView {
-                    VStack(spacing: 12) {
-                        // Top row: stock, waste, foundations
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 14) {
                         topRow
-
-                        // Tableau
                         tableauRow
                     }
                     .padding(.horizontal, 8)
-                    .padding(.bottom, 20)
+                    .padding(.vertical, 14)
                 }
             }
 
-            // Win overlay
             if game.isWon {
                 winOverlay
             }
@@ -345,50 +413,49 @@ struct SolitaireView: View {
     }
 
     private var topRow: some View {
-        HStack(spacing: 8) {
-            // Stock
+        HStack(spacing: 6) {
             Button(action: { game.tapStock() }) {
                 if game.stock.isEmpty {
                     ZStack {
-                        EmptySlotView()
+                        SolitaireEmptySlot()
                         Image(systemName: "arrow.counterclockwise")
-                            .foregroundColor(.white.opacity(0.5))
+                            .foregroundColor(.white.opacity(0.4))
+                            .font(.system(size: 20))
                     }
                 } else {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(LinearGradient(colors: [.blue.opacity(0.8), .indigo.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(red: 0.1, green: 0.15, blue: 0.4), Color(red: 0.2, green: 0.1, blue: 0.35)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.2), lineWidth: 1))
+                            .shadow(color: .blue.opacity(0.4), radius: 10)
                         Text("🂠")
-                            .font(.system(size: 36))
+                            .font(.system(size: 38))
                     }
-                    .frame(width: 60, height: 90)
-                    .shadow(radius: 3)
+                    .frame(width: 52, height: 78)
                 }
             }
 
-            // Waste
             Button(action: { game.tapWaste() }) {
                 if let top = game.waste.last {
                     SolitaireCardView(card: top, isSelected: game.selectedSource == .waste)
                 } else {
-                    EmptySlotView()
+                    SolitaireEmptySlot()
                 }
             }
 
             Spacer()
 
-            // Foundations
             ForEach(0..<4, id: \.self) { fi in
                 Button(action: { game.tapFoundation(foundIdx: fi) }) {
                     if let top = game.foundations[fi].last {
                         SolitaireCardView(card: top, isSelected: false)
                     } else {
-                        ZStack {
-                            EmptySlotView()
-                            Text(["♠️","♥️","♣️","♦️"][fi])
-                                .font(.system(size: 24))
-                                .opacity(0.4)
-                        }
+                        SolitaireEmptySlot(label: ["♠️","♥️","♣️","♦️"][fi])
                     }
                 }
             }
@@ -396,7 +463,7 @@ struct SolitaireView: View {
     }
 
     private var tableauRow: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 6) {
             ForEach(0..<7, id: \.self) { col in
                 tableauColumn(col: col)
             }
@@ -405,30 +472,24 @@ struct SolitaireView: View {
 
     private func tableauColumn(col: Int) -> some View {
         ZStack(alignment: .top) {
-            // Tap target for empty column
             Button(action: { game.tapTableau(col: col) }) {
-                EmptySlotView()
+                SolitaireEmptySlot()
             }
-
             if !game.tableau[col].isEmpty {
                 ZStack(alignment: .top) {
                     ForEach(Array(game.tableau[col].enumerated()), id: \.element.id) { idx, card in
-                        Button(action: {
-                            // Tapping any face-up card in the column selects the column
-                            // Tapping face-down just flips top
-                            game.tapTableau(col: col)
-                        }) {
+                        Button(action: { game.tapTableau(col: col) }) {
                             SolitaireCardView(
                                 card: card,
                                 isSelected: isCardSelected(card: card, col: col, idx: idx)
                             )
                         }
-                        .offset(y: CGFloat(idx) * 28)
+                        .offset(y: CGFloat(idx) * 24)
                     }
                 }
             }
         }
-        .frame(width: 60, height: max(90, 90 + CGFloat(max(0, game.tableau[col].count - 1)) * 28))
+        .frame(width: 52, height: max(78, 78 + CGFloat(max(0, game.tableau[col].count - 1)) * 24))
     }
 
     private func isCardSelected(card: SolitaireCard, col: Int, idx: Int) -> Bool {
@@ -439,25 +500,41 @@ struct SolitaireView: View {
 
     private var winOverlay: some View {
         ZStack {
-            Color.black.opacity(0.6).ignoresSafeArea()
-            VStack(spacing: 20) {
+            Color.black.opacity(0.7).ignoresSafeArea()
+            VStack(spacing: 24) {
                 Text("YOU WIN! 🎉")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
+                    .font(.system(size: 38, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
+                    .shadow(color: .cyan.opacity(0.8), radius: 20)
                 Text("Completed in \(game.moves) moves")
-                    .font(.title3)
-                    .foregroundColor(.white.opacity(0.8))
-                Button("Play Again") { game.newGame() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.white.opacity(0.7))
+                Button(action: { game.newGame() }) {
+                    Text("Play Again")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 36)
+                        .padding(.vertical, 14)
+                        .background(
+                            Capsule()
+                                .fill(
+                                    LinearGradient(colors: [.cyan, .purple], startPoint: .leading, endPoint: .trailing)
+                                )
+                                .shadow(color: .cyan.opacity(0.6), radius: 16)
+                        )
+                }
             }
             .padding(40)
             .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(.systemIndigo))
-                    .shadow(radius: 20)
+                RoundedRectangle(cornerRadius: 28)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28)
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
+                    .shadow(color: .purple.opacity(0.5), radius: 30)
             )
+            .padding(.horizontal, 30)
         }
     }
 }

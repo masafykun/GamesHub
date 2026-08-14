@@ -2,51 +2,54 @@ import SwiftUI
 
 // MARK: - Models
 
-enum EsCdClueType {
+enum EscapeCodeClue {
     case coloredShapes, emojiIcons, numberPattern
 }
 
-struct EsCdRoom {
+struct EscapeCodeRoom {
     let number: Int
-    let clueType: EsCdClueType
+    let clueType: EscapeCodeClue
     let pin: [Int]
     let clues: [String]
+    let hint: String
 }
 
-enum EsCdPhase {
-    case start, playing, success, failed, complete
+enum EscapeCodePhase {
+    case start, playing, complete
 }
 
-// MARK: - Main View
+// MARK: - Glassmorphism View
 
 struct EscapeCodeView: View {
-    @State private var phase: EsCdPhase = .start
+    @State private var phase: EscapeCodePhase = .start
     @State private var currentRoom: Int = 0
     @State private var enteredDigits: [Int] = []
     @State private var shakeTrigger: Int = 0
     @State private var doorsOpen: Bool = false
+    @State private var recentResults: [Bool] = []
+    @State private var difficultyLevel: Double = 1.0
 
-    private let rooms: [EsCdRoom] = [
-        EsCdRoom(number: 1, clueType: .coloredShapes, pin: [3,1,4,2],
-                 clues: ["Red=1 Blue=2 Green=3 Yellow=4", "🟥🟦🟩🟨", "△=3  ○=1  □=4  ◇=2"]),
-        EsCdRoom(number: 2, clueType: .emojiIcons, pin: [7,2,5,9],
-                 clues: ["🌟=7  🌊=2  🔥=5  🌙=9", "Star Wave Fire Moon", "Count the points: ★7 ~2 🔥5 ☽9"]),
-        EsCdRoom(number: 3, clueType: .numberPattern, pin: [1,4,9,6],
-                 clues: ["1² = ?  2² = ?  3² = ?  4² = ?", "Squares: 1, 4, 9, 16→6", "Pattern: 1·1, 2·2, 3·3, 4·4"]),
-        EsCdRoom(number: 4, clueType: .coloredShapes, pin: [8,0,3,7],
-                 clues: ["🔴8  ⚫0  🟢3  🔵7", "Red=8  Black=0  Green=3  Blue=7", "Circles: R8 K0 G3 B7"]),
-        EsCdRoom(number: 5, clueType: .emojiIcons, pin: [2,6,1,5],
-                 clues: ["🐉=2  🦊=6  🦋=1  🐬=5", "Dragon Fox Butterfly Dolphin", "D2 F6 B1 D5"])
+    private let rooms: [EscapeCodeRoom] = [
+        EscapeCodeRoom(number: 1, clueType: .coloredShapes, pin: [3,1,4,2],
+                   clues: ["🔴=3  🔵=1  🟢=4  🟡=2"], hint: "Color order: Red Blue Green Yellow"),
+        EscapeCodeRoom(number: 2, clueType: .emojiIcons, pin: [7,2,5,9],
+                   clues: ["🌟=7  🌊=2  🔥=5  🌙=9"], hint: "Stars, waves, flames, crescent"),
+        EscapeCodeRoom(number: 3, clueType: .numberPattern, pin: [1,4,9,6],
+                   clues: ["1²  2²  3²  4²  →  last digits"], hint: "Perfect squares, single digit"),
+        EscapeCodeRoom(number: 4, clueType: .coloredShapes, pin: [8,0,3,7],
+                   clues: ["🔴=8  ⚫=0  🟢=3  🔵=7"], hint: "Eight zero three seven"),
+        EscapeCodeRoom(number: 5, clueType: .emojiIcons, pin: [2,6,1,5],
+                   clues: ["🐉=2  🦊=6  🦋=1  🐬=5"], hint: "Dragon Fox Butterfly Dolphin")
     ]
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            LinearGradient(colors: [Color(red: 0.1, green: 0.05, blue: 0.25), Color(red: 0.05, green: 0.15, blue: 0.3)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
             switch phase {
             case .start: startScreen
             case .playing: gameScreen
             case .complete: completeScreen
-            default: gameScreen
             }
         }
     }
@@ -54,112 +57,153 @@ struct EscapeCodeView: View {
     // MARK: - Screens
 
     var startScreen: some View {
-        VStack(spacing: 24) {
-            Text("ESCAPE CODE").font(.largeTitle.bold()).foregroundColor(.green)
-            Text("Decode clues to crack the PIN\nand escape 5 rooms!").multilineTextAlignment(.center).foregroundColor(.gray)
-            Button("START") {
-                currentRoom = 0; enteredDigits = []; phase = .playing
-            }
-            .font(.title2.bold()).foregroundColor(.black).padding(.horizontal, 40).padding(.vertical, 14)
-            .background(Color.green).clipShape(Capsule())
+        VStack(spacing: 28) {
+            Spacer()
+            Text("🔐").font(.system(size: 72))
+            Text("ESCAPE CODE").font(.largeTitle.bold()).foregroundColor(.white)
+            Text("Decode visual clues.\nCrack the PIN.\nEscape all 5 rooms.").multilineTextAlignment(.center).foregroundColor(.white.opacity(0.7))
+            Text("Adaptive difficulty enabled").font(.caption).foregroundColor(.cyan.opacity(0.8))
+            Spacer()
+            Button("BEGIN") { startGame() }
+                .font(.title2.bold()).foregroundColor(.white)
+                .padding(.horizontal, 48).padding(.vertical, 16)
+                .background(.ultraThinMaterial).clipShape(Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
         }.padding()
     }
 
     var gameScreen: some View {
         let room = rooms[currentRoom]
-        return VStack(spacing: 16) {
-            // Header
+        return VStack(spacing: 14) {
+            // Header card
             HStack {
-                Text("ROOM \(room.number)/5").font(.headline).foregroundColor(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ROOM \(room.number) OF 5").font(.caption.bold()).foregroundColor(.white.opacity(0.6))
+                    Text("DIFFICULTY: \(String(format: "%.1f", difficultyLevel))x").font(.caption2).foregroundColor(.cyan.opacity(0.8))
+                }
                 Spacer()
-                Text(enteredDigits.map { "\($0)" }.joined(separator: " ")).font(.title2.monospaced()).foregroundColor(.white)
-            }.padding(.horizontal)
+                HStack(spacing: 6) {
+                    ForEach(0..<4, id: \.self) { i in
+                        ZStack {
+                            Circle().fill(i < enteredDigits.count ? Color.cyan : Color.white.opacity(0.2)).frame(width: 36, height: 36)
+                            if i < enteredDigits.count {
+                                Text("\(enteredDigits[i])").font(.headline.bold()).foregroundColor(.black)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding()
+            .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
+            .padding(.horizontal)
 
-            // Door graphic
+            // Door
             ZStack {
-                RoundedRectangle(cornerRadius: 8).fill(Color(white: 0.15)).frame(height: 120)
+                RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.05)).frame(height: 110)
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.2), lineWidth: 1))
                 if doorsOpen {
-                    Text("🚪").font(.system(size: 60)).offset(x: -30)
-                    Image(systemName: "arrow.right.circle.fill").font(.system(size: 40)).foregroundColor(.green).offset(x: 30)
+                    HStack(spacing: 16) {
+                        Text("🚪").font(.system(size: 52)).offset(x: -20)
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 36)).foregroundColor(.green)
+                    }
                 } else {
-                    Text("🚪").font(.system(size: 60))
+                    Text("🚪").font(.system(size: 52))
                 }
             }.padding(.horizontal)
 
-            // Clue panel
-            VStack(alignment: .leading, spacing: 8) {
-                Text("CLUES").font(.caption.bold()).foregroundColor(.green.opacity(0.7))
+            // Clue card
+            VStack(alignment: .leading, spacing: 10) {
+                Label("CLUES", systemImage: "eye.fill").font(.caption.bold()).foregroundColor(.cyan)
                 ForEach(room.clues, id: \.self) { clue in
-                    Text(clue).font(.system(.subheadline, design: .monospaced)).foregroundColor(.white).padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(white: 0.12)).clipShape(RoundedRectangle(cornerRadius: 8))
+                    Text(clue).font(.system(.body, design: .monospaced)).foregroundColor(.white)
+                        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.white.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-            }.padding(.horizontal)
+                Text("Hint: \(room.hint)").font(.caption).foregroundColor(.white.opacity(0.5)).italic()
+            }
+            .padding()
+            .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
+            .padding(.horizontal)
 
             Spacer()
 
             // Keypad
-            keypad
+            glassKeypad
         }
-        .modifier(EsCdShakeModifier(trigger: shakeTrigger))
-        .onAppear { doorsOpen = false }
+        .modifier(EscapeCodeShakeModifier(trigger: shakeTrigger))
     }
 
-    var keypad: some View {
+    var glassKeypad: some View {
         VStack(spacing: 8) {
             let rows = [[1,2,3],[4,5,6],[7,8,9]]
             ForEach(rows, id: \.self) { row in
                 HStack(spacing: 8) {
-                    ForEach(row, id: \.self) { digit in
-                        keyButton(digit)
-                    }
+                    ForEach(row, id: \.self) { digit in glassKey(digit) }
                 }
             }
             HStack(spacing: 8) {
                 Button("CLR") { enteredDigits.removeAll() }
-                    .frame(maxWidth: .infinity).frame(height: 52)
-                    .font(.headline).foregroundColor(.red)
-                    .background(Color(white: 0.15)).clipShape(RoundedRectangle(cornerRadius: 10))
-                keyButton(0)
-                Button("ENTER") { checkPin() }
-                    .frame(maxWidth: .infinity).frame(height: 52)
-                    .font(.headline).foregroundColor(.green)
-                    .background(Color(white: 0.15)).clipShape(RoundedRectangle(cornerRadius: 10))
+                    .frame(maxWidth: .infinity).frame(height: 52).font(.headline.bold()).foregroundColor(.red.opacity(0.9))
+                    .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.2), lineWidth: 1))
+                glassKey(0)
+                Button("GO") { checkPin() }
+                    .frame(maxWidth: .infinity).frame(height: 52).font(.headline.bold()).foregroundColor(.cyan)
+                    .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(.cyan.opacity(0.4), lineWidth: 1))
             }
         }.padding(.horizontal).padding(.bottom)
     }
 
-    func keyButton(_ digit: Int) -> some View {
+    func glassKey(_ digit: Int) -> some View {
         Button("\(digit)") {
             if enteredDigits.count < 4 { enteredDigits.append(digit) }
         }
-        .frame(maxWidth: .infinity).frame(height: 52).font(.title2.bold())
-        .foregroundColor(.white).background(Color(white: 0.18)).clipShape(RoundedRectangle(cornerRadius: 10))
+        .frame(maxWidth: .infinity).frame(height: 52).font(.title2.bold()).foregroundColor(.white)
+        .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.2), lineWidth: 1))
     }
 
     var completeScreen: some View {
         VStack(spacing: 24) {
-            Text("🎉").font(.system(size: 80))
-            Text("ESCAPED!").font(.largeTitle.bold()).foregroundColor(.green)
-            Text("You cracked all 5 room codes!").foregroundColor(.gray)
-            Button("PLAY AGAIN") { currentRoom = 0; enteredDigits = []; doorsOpen = false; phase = .playing }
-                .font(.title2.bold()).foregroundColor(.black).padding(.horizontal, 40).padding(.vertical, 14)
-                .background(Color.green).clipShape(Capsule())
-        }
+            Spacer()
+            Text("🎊").font(.system(size: 80))
+            Text("FREEDOM!").font(.largeTitle.bold()).foregroundColor(.white)
+            Text("All 5 rooms escaped!").foregroundColor(.white.opacity(0.7))
+            Text("Final difficulty: \(String(format: "%.1f", difficultyLevel))x").font(.subheadline).foregroundColor(.cyan)
+            Spacer()
+            Button("ESCAPE AGAIN") { startGame() }
+                .font(.title2.bold()).foregroundColor(.white)
+                .padding(.horizontal, 40).padding(.vertical, 16)
+                .background(.ultraThinMaterial).clipShape(Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
+        }.padding()
     }
 
     // MARK: - Logic
 
+    func startGame() {
+        currentRoom = 0; enteredDigits = []; doorsOpen = false
+        recentResults = []; difficultyLevel = 1.0; phase = .playing
+    }
+
     func checkPin() {
         let room = rooms[currentRoom]
-        if enteredDigits == room.pin {
+        let correct = enteredDigits == room.pin
+        recentResults.append(correct)
+        if recentResults.count > 5 { recentResults.removeFirst() }
+        if recentResults.count == 5 && recentResults.filter({ $0 }).count > 4 {
+            difficultyLevel = min(difficultyLevel * 1.2, 3.0)
+        }
+        if correct {
             doorsOpen = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            let delay = max(0.3, 1.0 / difficultyLevel)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 if currentRoom < rooms.count - 1 {
                     currentRoom += 1; enteredDigits = []; doorsOpen = false
-                } else {
-                    phase = .complete
-                }
+                } else { phase = .complete }
             }
         } else {
             shakeTrigger += 1
@@ -168,9 +212,9 @@ struct EscapeCodeView: View {
     }
 }
 
-// MARK: - Shake Modifier
+// MARK: - Shake
 
-struct EsCdShakeModifier: ViewModifier {
+struct EscapeCodeShakeModifier: ViewModifier {
     let trigger: Int
     @State private var offset: CGFloat = 0
     func body(content: Content) -> some View {

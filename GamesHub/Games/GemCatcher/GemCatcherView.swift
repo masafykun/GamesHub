@@ -35,323 +35,646 @@ struct GemCatcherFallingItem: Identifiable {
     }
 }
 
-// MARK: - ViewModel
 
-class GemCatcherViewModel: ObservableObject {
-    // Layout constants — set when view appears
-    var screenWidth: CGFloat = 390
-    var screenHeight: CGFloat = 844
+// MARK: - Models
 
-    // Game state
-    @Published var score: Int = 0
-    @Published var timeRemaining: Int = 60
-    @Published var items: [GemCatcherFallingItem] = []
-    @Published var basketX: CGFloat = 195
-    @Published var isGameOver: Bool = false
-    @Published var isRunning: Bool = false
+enum GemCatcherDifficulty: String {
+    case easy   = "Easy"
+    case medium = "Medium"
+    case hard   = "Hard"
 
-    // Flash feedback
-    @Published var feedbackText: String = ""
-    @Published var feedbackOpacity: Double = 0
-
-    let basketWidth: CGFloat = 90
-    let basketHeight: CGFloat = 22
-
-    private var gameTimer: Timer?
-    private var countdownTimer: Timer?
-    private var spawnAccumulator: Double = 0
-    private var frameAccumulator: Double = 0
-    private var difficultyMultiplier: Double = 1.0
-
-    var basketY: CGFloat {
-        screenHeight - 80
-    }
-
-    // MARK: - Lifecycle
-
-    func startGame() {
-        score = 0
-        timeRemaining = 60
-        items = []
-        basketX = screenWidth / 2
-        isGameOver = false
-        isRunning = true
-        spawnAccumulator = 0
-        difficultyMultiplier = 1.0
-        feedbackOpacity = 0
-
-        startGameLoop()
-        startCountdown()
-    }
-
-    func stopGame() {
-        gameTimer?.invalidate()
-        gameTimer = nil
-        countdownTimer?.invalidate()
-        countdownTimer = nil
-        isRunning = false
-    }
-
-    private func startGameLoop() {
-        gameTimer?.invalidate()
-        gameTimer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            self?.update()
-        }
-        RunLoop.main.add(gameTimer!, forMode: .common)
-    }
-
-    private func startCountdown() {
-        countdownTimer?.invalidate()
-        countdownTimer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            DispatchQueue.main.async {
-                if self.timeRemaining > 0 {
-                    self.timeRemaining -= 1
-                    // Increase difficulty over time
-                    self.difficultyMultiplier = 1.0 + Double(60 - self.timeRemaining) / 60.0
-                } else {
-                    self.endGame()
-                }
-            }
-        }
-        RunLoop.main.add(countdownTimer!, forMode: .common)
-    }
-
-    private func endGame() {
-        stopGame()
-        isGameOver = true
-    }
-
-    // MARK: - Update
-
-    private func update() {
-        let dt: Double = 1.0 / 60.0
-        spawnAccumulator += dt
-
-        // Spawn interval decreases as difficulty increases
-        let spawnInterval = max(0.6, 1.4 / difficultyMultiplier)
-
-        if spawnAccumulator >= spawnInterval {
-            spawnAccumulator = 0
-            spawnItem()
-        }
-
-        // Move items downward
-        var toRemove: [UUID] = []
-        var caught: [(UUID, GemCatcherItemType)] = []
-
-        for i in items.indices {
-            items[i].y += items[i].speed * CGFloat(difficultyMultiplier)
-
-            let item = items[i]
-
-            // Check catch
-            if item.y + item.radius >= basketY - basketHeight / 2 &&
-               item.y - item.radius <= basketY + basketHeight / 2 &&
-               item.x >= basketX - basketWidth / 2 - item.radius &&
-               item.x <= basketX + basketWidth / 2 + item.radius {
-                caught.append((item.id, item.type))
-                toRemove.append(item.id)
-                continue
-            }
-
-            // Off screen
-            if item.y - item.radius > screenHeight {
-                if case .gem = item.type {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.applyMiss()
-                    }
-                }
-                toRemove.append(item.id)
-            }
-        }
-
-        items.removeAll { toRemove.contains($0.id) }
-
-        for (_, type) in caught {
-            switch type {
-            case .gem:
-                DispatchQueue.main.async { [weak self] in self?.applyCatch() }
-            case .bomb:
-                DispatchQueue.main.async { [weak self] in self?.applyBomb() }
-            }
+    var badgeColor: Color {
+        switch self {
+        case .easy:   return Color(red: 0.2, green: 0.8, blue: 0.4)
+        case .medium: return Color(red: 1.0, green: 0.7, blue: 0.1)
+        case .hard:   return Color(red: 0.9, green: 0.2, blue: 0.2)
         }
     }
 
-    private func spawnItem() {
-        let margin: CGFloat = 30
-        let x = CGFloat.random(in: margin...(screenWidth - margin))
-
-        // 20% chance of bomb
-        let isBomb = Double.random(in: 0...1) < 0.20
-        let type: GemCatcherItemType
-        if isBomb {
-            type = .bomb
-        } else {
-            let gemColor = GemCatcherGemColor.allCases.randomElement()!
-            type = .gem(gemColor)
-        }
-
-        let baseSpeed = CGFloat.random(in: 2.8...4.5)
-
-        let item = GemCatcherFallingItem(x: x, y: -20, type: type, speed: baseSpeed)
-        items.append(item)
-    }
-
-    // MARK: - Scoring
-
-    private func applyCatch() {
-        score += 10
-        showFeedback("+10", color: .green)
-    }
-
-    private func applyMiss() {
-        score = max(score - 5, -999)
-        showFeedback("-5", color: .orange)
-    }
-
-    private func applyBomb() {
-        score = max(score - 30, -999)
-        showFeedback("-30", color: .red)
-    }
-
-    private func showFeedback(_ text: String, color: Color) {
-        feedbackText = text
-        withAnimation(.easeIn(duration: 0.1)) {
-            feedbackOpacity = 1
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
-            withAnimation(.easeOut(duration: 0.3)) {
-                self?.feedbackOpacity = 0
-            }
+    var baseSpeed: CGFloat {
+        switch self {
+        case .easy:   return 2.5
+        case .medium: return 4.0
+        case .hard:   return 6.0
         }
     }
 
-    // MARK: - Basket Control
+    var spawnInterval: Double {
+        switch self {
+        case .easy:   return 1.4
+        case .medium: return 1.0
+        case .hard:   return 0.65
+        }
+    }
 
-    func movBasket(to x: CGFloat) {
-        let half = basketWidth / 2
-        basketX = min(max(x, half), screenWidth - half)
+    var bombProbability: Double {
+        switch self {
+        case .easy:   return 0.10
+        case .medium: return 0.18
+        case .hard:   return 0.28
+        }
     }
 }
 
 // MARK: - Main View
 
 struct GemCatcherView: View {
-    @StateObject private var vm = GemCatcherViewModel()
-    @GestureState private var dragOffset: CGFloat = 0
-    @State private var dragStartBasketX: CGFloat = 0
+
+    // MARK: Persistent state
+    @State var roundScores: [Int] = []
+    @AppStorage("gemCatcherBestScore") private var bestScore: Int = 0
+
+    // MARK: Game state
+    @State private var score: Int = 0
+    @State private var timeRemaining: Int = 60
+    @State private var isPlaying: Bool = false
+    @State private var showGameOver: Bool = false
+    @State private var difficulty: GemCatcherDifficulty = .medium
+
+    // MARK: Basket
+    @State private var basketX: CGFloat = 0
+    @State private var dragOffsetX: CGFloat = 0
+
+    // MARK: Falling items
+    @State private var fallingItems: [GemCatcherFallingItem] = []
+    @State private var spawnAccumulator: Double = 0
+
+    // MARK: Timers
+    @State private var gameTimer: Timer? = nil
+    @State private var countdownTimer: Timer? = nil
+
+    // MARK: Geometry cache
+    @State private var screenWidth: CGFloat = 390
+    @State private var screenHeight: CGFloat = 844
+
+    // MARK: Score flash
+    @State private var scoreFlash: String = ""
+    @State private var flashOpacity: Double = 0
+
+    // MARK: Constants
+    private let basketWidth: CGFloat  = 90
+    private let basketHeight: CGFloat = 22
+    private let itemRadius: CGFloat   = 18
+    private let gameTickRate: Double  = 1.0 / 60.0
+
+    // MARK: Computed basket position
+    private var clampedBasketX: CGFloat {
+        let half = basketWidth / 2
+        let raw  = basketX + dragOffsetX
+        return max(half, min(screenWidth - half, raw))
+    }
+
+    private var starPositions: [(CGFloat, CGFloat, Double, CGFloat)] {
+        (0..<20).map { i in
+            let x = CGFloat((i * 37 + 13) % max(1, Int(screenWidth)))
+            let y = CGFloat((i * 53 + 7) % max(1, Int(screenHeight * 0.8)))
+            let opacity = Double((i * 17 + 11) % 30) / 100.0 + 0.1
+            let sz = CGFloat((i * 7 + 3) % 3) + 1
+            return (x, y, opacity, sz)
+        }
+    }
+
+    // MARK: Body
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                // Background
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(red: 0.05, green: 0.05, blue: 0.18),
-                        Color(red: 0.10, green: 0.05, blue: 0.25)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
+                backgroundGradient
 
-                // Stars background
-                GemCatcherStarsView()
-
-                if vm.isRunning || vm.isGameOver {
-                    // Game field
-                    gameField(geo: geo)
+                if isPlaying || showGameOver {
+                    gameLayer
                 }
 
-                if !vm.isRunning && !vm.isGameOver {
-                    GemCatcherStartView {
-                        vm.screenWidth = geo.size.width
-                        vm.screenHeight = geo.size.height
-                        vm.startGame()
-                    }
+                if !isPlaying && !showGameOver {
+                    startOverlay
                 }
 
-                if vm.isGameOver {
-                    GemCatcherGameOverView(score: vm.score) {
-                        vm.screenWidth = geo.size.width
-                        vm.screenHeight = geo.size.height
-                        vm.startGame()
-                    }
+                if showGameOver {
+                    gameOverOverlay
                 }
             }
             .onAppear {
-                vm.screenWidth = geo.size.width
-                vm.screenHeight = geo.size.height
+                screenWidth  = geo.size.width
+                screenHeight = geo.size.height
+                basketX      = geo.size.width / 2
+            }
+            .onChange(of: geo.size) { newSize in
+                screenWidth  = newSize.width
+                screenHeight = newSize.height
             }
         }
+        .ignoresSafeArea()
+        .preferredColorScheme(.dark)
     }
 
-    @ViewBuilder
-    private func gameField(geo: GeometryProxy) -> some View {
+    // MARK: - Layers
+
+    private var backgroundGradient: some View {
+        LinearGradient(
+            gradient: Gradient(colors: [
+                Color(red: 0.05, green: 0.05, blue: 0.15),
+                Color(red: 0.08, green: 0.03, blue: 0.20),
+                Color(red: 0.03, green: 0.08, blue: 0.18)
+            ]),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var gameLayer: some View {
         ZStack {
-            // HUD
-            VStack {
-                GemCatcherHUDView(score: vm.score, timeRemaining: vm.timeRemaining)
-                Spacer()
+            // Stars decoration
+            ForEach(starPositions, id: \.0) { star in
+                Circle()
+                    .fill(Color.white.opacity(star.2))
+                    .frame(width: star.3, height: star.3)
+                    .position(x: star.0, y: star.1)
             }
 
             // Falling items
-            ForEach(vm.items) { item in
+            ForEach(fallingItems) { item in
                 GemCatcherItemView(item: item)
                     .position(x: item.x, y: item.y)
             }
 
             // Basket
-            GemCatcherBasketView(width: vm.basketWidth, height: vm.basketHeight)
-                .position(x: vm.basketX, y: vm.basketY)
-
-            // Feedback label
-            Text(vm.feedbackText)
-                .font(.system(size: 32, weight: .black, design: .rounded))
-                .foregroundColor(.white)
-                .shadow(color: .black, radius: 4)
-                .opacity(vm.feedbackOpacity)
-                .position(x: geo.size.width / 2, y: geo.size.height / 2 - 40)
-                .allowsHitTesting(false)
-
-            // Drag capture overlay
-            Color.clear
-                .contentShape(Rectangle())
+            basketView
+                .position(x: clampedBasketX, y: screenHeight - 80)
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
-                            vm.movBasket(to: value.location.x)
+                            dragOffsetX = value.translation.width
+                        }
+                        .onEnded { value in
+                            basketX     = clampedBasketX
+                            dragOffsetX = 0
                         }
                 )
-        }
-    }
-}
 
-// MARK: - Sub-views
+            // HUD
+            hudView
 
-struct GemCatcherStarsView: View {
-    // Fixed star positions to avoid recompute
-    private let stars: [(CGFloat, CGFloat, Double)] = (0..<80).map { _ in
-        (CGFloat.random(in: 0...400), CGFloat.random(in: 0...900), Double.random(in: 0.3...1.0))
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            ForEach(0..<stars.count, id: \.self) { i in
-                Circle()
-                    .fill(Color.white.opacity(stars[i].2 * 0.6))
-                    .frame(width: 2, height: 2)
-                    .position(
-                        x: stars[i].0 / 400 * geo.size.width,
-                        y: stars[i].1 / 900 * geo.size.height
-                    )
+            // Score flash
+            if flashOpacity > 0 {
+                Text(scoreFlash)
+                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .foregroundColor(scoreFlash.hasPrefix("+") ? Color(red: 0.3, green: 1.0, blue: 0.5) : Color(red: 1.0, green: 0.35, blue: 0.35))
+                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
+                    .opacity(flashOpacity)
+                    .position(x: screenWidth / 2, y: screenHeight / 2 - 60)
+                    .allowsHitTesting(false)
             }
         }
-        .allowsHitTesting(false)
+    }
+
+    private var basketView: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.8),
+                                    Color.white.opacity(0.3)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 2
+                        )
+                )
+                .shadow(color: Color.white.opacity(0.25), radius: 8, x: 0, y: -2)
+        }
+        .frame(width: basketWidth, height: basketHeight)
+    }
+
+    private var hudView: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                // Score
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("SCORE")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.6))
+                        .tracking(2)
+                    Text("\(score)")
+                        .font(.system(size: 30, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .contentTransition(.numericText())
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+                )
+
+                Spacer()
+
+                // Difficulty badge
+                Text(difficulty.rawValue)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(difficulty.badgeColor.opacity(0.35), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(difficulty.badgeColor.opacity(0.7), lineWidth: 1.5)
+                    )
+
+                Spacer()
+
+                // Timer
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("TIME")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.6))
+                        .tracking(2)
+                    Text("\(timeRemaining)")
+                        .font(.system(size: 30, weight: .black, design: .rounded))
+                        .foregroundColor(timeRemaining <= 10 ? Color(red: 1.0, green: 0.35, blue: 0.35) : .white)
+                        .contentTransition(.numericText())
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+                )
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 60)
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Overlays
+
+    private var startOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                Text("Gem Catcher")
+                    .font(.system(size: 40, weight: .black, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color(red: 0.8, green: 0.5, blue: 1.0), Color(red: 0.4, green: 0.7, blue: 1.0)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .shadow(color: Color(red: 0.6, green: 0.3, blue: 1.0).opacity(0.6), radius: 12)
+
+                Text(" — Adaptive Difficulty")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+
+                VStack(spacing: 8) {
+                    gemLegendRow(color: Color(red: 0.9, green: 0.2, blue: 0.2), label: "Ruby  +10")
+                    gemLegendRow(color: Color(red: 0.1, green: 0.8, blue: 0.3), label: "Emerald  +10")
+                    gemLegendRow(color: Color(red: 0.2, green: 0.4, blue: 1.0), label: "Sapphire  +10")
+                    bombLegendRow(label: "Bomb  -30")
+                    Text("Miss  -5")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                .padding(20)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+
+                if !roundScores.isEmpty {
+                    VStack(spacing: 6) {
+                        Text("Last Rounds: \(roundScores.map { "\($0)" }.joined(separator: ", "))")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.6))
+                        Text("Difficulty: \(difficulty.rawValue)")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundColor(difficulty.badgeColor)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+                }
+
+                Button(action: startGame) {
+                    Text("Play")
+                        .font(.system(size: 22, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .frame(width: 180, height: 54)
+                        .background(
+                            LinearGradient(
+                                colors: [Color(red: 0.5, green: 0.2, blue: 1.0), Color(red: 0.2, green: 0.5, blue: 1.0)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .clipShape(Capsule())
+                        .shadow(color: Color(red: 0.4, green: 0.3, blue: 1.0).opacity(0.5), radius: 12, x: 0, y: 4)
+                }
+            }
+            .padding(32)
+        }
+    }
+
+    private var gameOverOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.55)
+                .ignoresSafeArea()
+
+            VStack(spacing: 20) {
+                Text("Time's Up!")
+                    .font(.system(size: 36, weight: .black, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color(red: 1.0, green: 0.6, blue: 0.2), Color(red: 1.0, green: 0.3, blue: 0.5)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+
+                VStack(spacing: 6) {
+                    Text("Final Score")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.6))
+                        .tracking(2)
+                    Text("\(score)")
+                        .font(.system(size: 56, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                }
+
+                if roundScores.count >= 2 {
+                    VStack(spacing: 6) {
+                        Text("Recent Scores")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                            .tracking(1.5)
+                        HStack(spacing: 10) {
+                            ForEach(roundScores.indices, id: \.self) { i in
+                                Text("\(roundScores[i])")
+                                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.8))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                        Text("Next difficulty: \(difficulty.rawValue)")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundColor(difficulty.badgeColor)
+                    }
+                    .padding(16)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+                }
+
+                HStack(spacing: 16) {
+                    Button(action: startGame) {
+                        Text("Play Again")
+                            .font(.system(size: 18, weight: .black, design: .rounded))
+                            .foregroundColor(.white)
+                            .frame(width: 150, height: 50)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color(red: 0.5, green: 0.2, blue: 1.0), Color(red: 0.2, green: 0.5, blue: 1.0)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .clipShape(Capsule())
+                            .shadow(color: Color(red: 0.4, green: 0.3, blue: 1.0).opacity(0.5), radius: 10, x: 0, y: 4)
+                    }
+
+                    Button(action: returnToMenu) {
+                        Text("Menu")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.8))
+                            .frame(width: 110, height: 50)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Color.white.opacity(0.2), lineWidth: 1)
+                            )
+                    }
+                }
+            }
+            .padding(32)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28))
+            .overlay(
+                RoundedRectangle(cornerRadius: 28)
+                    .strokeBorder(Color.white.opacity(0.15), lineWidth: 1.5)
+            )
+            .shadow(color: .black.opacity(0.4), radius: 30, x: 0, y: 10)
+            .padding(.horizontal, 24)
+        }
+    }
+
+    // MARK: - Legend Helpers
+
+    private func gemLegendRow(color: Color, label: String) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(color)
+                .frame(width: 16, height: 16)
+                .shadow(color: color.opacity(0.8), radius: 4)
+            Text(label)
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
+            Spacer()
+        }
+    }
+
+    private func bombLegendRow(label: String) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(Color(red: 0.15, green: 0.15, blue: 0.15))
+                .overlay(Circle().strokeBorder(Color.red.opacity(0.8), lineWidth: 2))
+                .frame(width: 16, height: 16)
+            Text(label)
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
+            Spacer()
+        }
+    }
+
+    // MARK: - Game Logic
+
+    private func startGame() {
+        score          = 0
+        timeRemaining  = 60
+        fallingItems   = []
+        spawnAccumulator = 0
+        showGameOver   = false
+        isPlaying      = true
+        basketX        = screenWidth / 2
+        dragOffsetX    = 0
+
+        startGameLoop()
+        startCountdown()
+    }
+
+    private func returnToMenu() {
+        showGameOver = false
+        isPlaying    = false
+        stopTimers()
+        fallingItems = []
+    }
+
+    private func startGameLoop() {
+        gameTimer?.invalidate()
+        let timer = Timer(timeInterval: gameTickRate, repeats: true) { _ in
+            gameTick()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        gameTimer = timer
+    }
+
+    private func startCountdown() {
+        countdownTimer?.invalidate()
+        let timer = Timer(timeInterval: 1.0, repeats: true) { _ in
+            if timeRemaining > 0 {
+                timeRemaining -= 1
+            } else {
+                endGame()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        countdownTimer = timer
+    }
+
+    private func stopTimers() {
+        gameTimer?.invalidate()
+        countdownTimer?.invalidate()
+        gameTimer     = nil
+        countdownTimer = nil
+    }
+
+    private func endGame() {
+        stopTimers()
+        isPlaying = false
+
+        bestScore = max(bestScore, score)
+
+        // Update round scores (keep last 5)
+        roundScores.append(score)
+        if roundScores.count > 5 {
+            roundScores = Array(roundScores.suffix(5))
+        }
+
+        // Compute moving average and adjust difficulty
+        let avg = Double(roundScores.reduce(0, +)) / Double(roundScores.count)
+        if avg >= 200 {
+            difficulty = .hard
+        } else if avg >= 80 {
+            difficulty = .medium
+        } else {
+            difficulty = .easy
+        }
+
+        showGameOver = true
+    }
+
+    private func gameTick() {
+        guard isPlaying else { return }
+
+        spawnAccumulator += gameTickRate
+        let interval = difficulty.spawnInterval
+
+        if spawnAccumulator >= interval {
+            spawnAccumulator = 0
+            spawnItem()
+        }
+
+        // Move items
+        var toRemove: [UUID] = []
+        for i in fallingItems.indices {
+            fallingItems[i].y += fallingItems[i].speed
+            if fallingItems[i].y > screenHeight + itemRadius {
+                // Missed (only penalize gems, not bombs)
+                if case .gem = fallingItems[i].type {
+                    score = max(score - 5, -999)
+                    showFlash("-5")
+                }
+                toRemove.append(fallingItems[i].id)
+            }
+        }
+        fallingItems.removeAll { toRemove.contains($0.id) }
+
+        // Collision detection
+        let basketY  = screenHeight - 80
+        let halfBasket = basketWidth / 2
+        var caught: [UUID] = []
+
+        for item in fallingItems {
+            let dx = abs(item.x - clampedBasketX)
+            let dy = abs(item.y - basketY)
+            if dx < halfBasket + itemRadius * 0.5 && dy < basketHeight / 2 + itemRadius * 0.7 {
+                caught.append(item.id)
+                switch item.type {
+                case .gem:
+                    score += 10
+                    showFlash("+10")
+                case .bomb:
+                    score = max(score - 30, -999)
+                    showFlash("-30")
+                }
+            }
+        }
+        fallingItems.removeAll { caught.contains($0.id) }
+    }
+
+    private func spawnItem() {
+        let margin: CGFloat = itemRadius + 8
+        let x = CGFloat.random(in: margin...(screenWidth - margin))
+
+        // Adaptive speed: scale within difficulty band based on remaining time
+        let timeProgress = 1.0 - (Double(timeRemaining) / 60.0)
+        let baseSpeed    = difficulty.baseSpeed
+        let speedBonus   = baseSpeed * timeProgress * 0.4
+        let speed        = CGFloat(baseSpeed + speedBonus)
+
+        let isBomb = Double.random(in: 0...1) < difficulty.bombProbability
+        let type: GemCatcherItemType = isBomb
+            ? .bomb
+            : .gem(GemCatcherGemColor.allCases.randomElement() ?? .red)
+
+        let item = GemCatcherFallingItem(x: x, y: -itemRadius, type: type, speed: speed)
+        fallingItems.append(item)
+    }
+
+    private func showFlash(_ text: String) {
+        scoreFlash  = text
+        flashOpacity = 1.0
+        withAnimation(.easeOut(duration: 0.8)) {
+            flashOpacity = 0
+        }
     }
 }
 
+// MARK: - Item View
+
+// MARK: - Preview
+
+#Preview {
+    GemCatcherView()
+}
 struct GemCatcherItemView: View {
     let item: GemCatcherFallingItem
 
@@ -366,7 +689,6 @@ struct GemCatcherItemView: View {
         }
     }
 }
-
 struct GemCatcherGemShape: View {
     let color: Color
     let radius: CGFloat
@@ -397,7 +719,6 @@ struct GemCatcherGemShape: View {
         .frame(width: radius * 2, height: radius * 2)
     }
 }
-
 struct GemCatcherBombShape: View {
     let radius: CGFloat
 
@@ -423,219 +744,6 @@ struct GemCatcherBombShape: View {
             // Skull-like cross
             Text("💣")
                 .font(.system(size: radius * 1.1))
-        }
-    }
-}
-
-struct GemCatcherBasketView: View {
-    let width: CGFloat
-    let height: CGFloat
-
-    var body: some View {
-        ZStack {
-            // Shadow
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.black.opacity(0.3))
-                .frame(width: width + 6, height: height + 6)
-                .offset(y: 3)
-
-            // Main basket
-            RoundedRectangle(cornerRadius: 10)
-                .fill(
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color(red: 0.9, green: 0.85, blue: 0.3),
-                            Color(red: 0.7, green: 0.55, blue: 0.1)
-                        ]),
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: width, height: height)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.white.opacity(0.5), lineWidth: 2)
-                )
-
-            // Shine
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.3))
-                .frame(width: width * 0.6, height: height * 0.35)
-                .offset(y: -height * 0.15)
-        }
-    }
-}
-
-struct GemCatcherHUDView: View {
-    let score: Int
-    let timeRemaining: Int
-
-    var timerColor: Color {
-        timeRemaining > 20 ? .white : (timeRemaining > 10 ? .yellow : .red)
-    }
-
-    var body: some View {
-        HStack {
-            // Score
-            HStack(spacing: 6) {
-                Image(systemName: "star.fill")
-                    .foregroundColor(.yellow)
-                Text("\(score)")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.12))
-            )
-
-            Spacer()
-
-            // Timer
-            HStack(spacing: 6) {
-                Image(systemName: "clock.fill")
-                    .foregroundColor(timerColor)
-                Text("\(timeRemaining)s")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundColor(timerColor)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.12))
-            )
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-    }
-}
-
-struct GemCatcherStartView: View {
-    let onStart: () -> Void
-
-    var body: some View {
-        VStack(spacing: 28) {
-            Text("💎")
-                .font(.system(size: 72))
-
-            Text("Gem Catcher")
-                .font(.system(size: 38, weight: .black, design: .rounded))
-                .foregroundColor(.white)
-
-            VStack(alignment: .leading, spacing: 10) {
-                GemCatcherRuleRow(icon: "💎", text: "Catch gems: +10")
-                GemCatcherRuleRow(icon: "❌", text: "Miss gem: -5")
-                GemCatcherRuleRow(icon: "💣", text: "Catch bomb: -30")
-                GemCatcherRuleRow(icon: "👆", text: "Drag to move basket")
-            }
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.white.opacity(0.08))
-            )
-
-            Button(action: onStart) {
-                Text("Start Game")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 48)
-                    .padding(.vertical, 16)
-                    .background(
-                        LinearGradient(
-                            gradient: Gradient(colors: [.yellow, .orange]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .clipShape(Capsule())
-                    .shadow(color: .orange.opacity(0.5), radius: 12, x: 0, y: 6)
-            }
-        }
-        .padding(32)
-        .background(
-            RoundedRectangle(cornerRadius: 28)
-                .fill(Color(red: 0.1, green: 0.08, blue: 0.22).opacity(0.95))
-                .shadow(color: .black.opacity(0.5), radius: 24)
-        )
-        .padding(24)
-    }
-}
-
-struct GemCatcherRuleRow: View {
-    let icon: String
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(icon)
-                .font(.system(size: 20))
-            Text(text)
-                .font(.system(size: 16, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
-        }
-    }
-}
-
-struct GemCatcherGameOverView: View {
-    let score: Int
-    let onRestart: () -> Void
-
-    var medal: String {
-        if score >= 300 { return "🥇" }
-        if score >= 150 { return "🥈" }
-        if score >= 50  { return "🥉" }
-        return "😢"
-    }
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.6)
-                .ignoresSafeArea()
-
-            VStack(spacing: 24) {
-                Text("Game Over")
-                    .font(.system(size: 36, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-
-                Text(medal)
-                    .font(.system(size: 60))
-
-                VStack(spacing: 6) {
-                    Text("Final Score")
-                        .font(.system(size: 16, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.6))
-                    Text("\(score)")
-                        .font(.system(size: 52, weight: .black, design: .rounded))
-                        .foregroundColor(.yellow)
-                }
-
-                Button(action: onRestart) {
-                    Text("Play Again")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 48)
-                        .padding(.vertical, 16)
-                        .background(
-                            LinearGradient(
-                                gradient: Gradient(colors: [.yellow, .orange]),
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .clipShape(Capsule())
-                        .shadow(color: .orange.opacity(0.5), radius: 12, x: 0, y: 6)
-                }
-            }
-            .padding(36)
-            .background(
-                RoundedRectangle(cornerRadius: 28)
-                    .fill(Color(red: 0.08, green: 0.06, blue: 0.20))
-                    .shadow(color: .black.opacity(0.6), radius: 30)
-            )
-            .padding(28)
         }
     }
 }

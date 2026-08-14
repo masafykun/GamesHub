@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum CtFshFishType: CaseIterable {
+enum CatchFishFishType: CaseIterable {
     case small, medium, large, shark, octopus
 
     var emoji: String {
@@ -23,52 +23,61 @@ enum CtFshFishType: CaseIterable {
         }
     }
 
-    var size: CGFloat {
+    var baseSize: CGFloat {
         switch self {
-        case .small: return 36
-        case .medium: return 48
-        case .large: return 56
-        case .shark: return 60
-        case .octopus: return 44
+        case .small: return 34
+        case .medium: return 46
+        case .large: return 54
+        case .shark: return 58
+        case .octopus: return 42
         }
     }
 
-    var speed: CGFloat {
+    var baseSpeed: CGFloat {
         switch self {
-        case .small: return 110
-        case .medium: return 80
-        case .large: return 60
-        case .shark: return 130
-        case .octopus: return 70
+        case .small: return 105
+        case .medium: return 78
+        case .large: return 58
+        case .shark: return 128
+        case .octopus: return 68
         }
     }
 }
 
-struct CtFshFish: Identifiable {
+struct CatchFishFish: Identifiable {
     let id = UUID()
-    var type: CtFshFishType
+    var type: CatchFishFishType
     var x: CGFloat
     var y: CGFloat
     var goingRight: Bool
 }
 
-enum CtFshPhase {
+enum CatchFishPhase {
     case start, playing, gameOver
 }
 
 struct CatchFishView: View {
-    @State private var phase: CtFshPhase = .start
+    @State private var phase: CatchFishPhase = .start
     @State private var score: Int = 0
     @State private var timeLeft: Int = 30
-    @State private var fish: [CtFshFish] = []
+    @State private var fish: [CatchFishFish] = []
     @State private var gameTimer: Timer? = nil
     @State private var spawnTimer: Timer? = nil
-    @State private var lastCatch: String = ""
-    @State private var showCatch: Bool = false
+    @State private var recentResults: [Bool] = []
+    @State private var difficultyMultiplier: Double = 1.0
+    @State private var catchLabel: String = ""
+    @State private var showLabel: Bool = false
+    @State private var moveTimer: Timer? = nil
+    @State private var canvasSize: CGSize = UIScreen.main.bounds.size
+    @AppStorage("catchFishBestScore") private var bestScore: Int = 0
 
     var body: some View {
         ZStack {
-            Color(red: 0.05, green: 0.25, blue: 0.45).ignoresSafeArea()
+            LinearGradient(
+                colors: [Color(red: 0.08, green: 0.18, blue: 0.55), Color(red: 0.0, green: 0.55, blue: 0.65)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ).ignoresSafeArea()
 
             switch phase {
             case .start:
@@ -82,39 +91,46 @@ struct CatchFishView: View {
     }
 
     var startScreen: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 28) {
             Text("🎣 Catch Fish").font(.largeTitle).bold().foregroundColor(.white)
-            Text("Tap fish to catch them!\nAvoid 🦈 (−5 pts)").multilineTextAlignment(.center).foregroundColor(.white.opacity(0.85))
-            Button("Start Game") {
-                startGame()
-            }
-            .font(.title2).bold()
-            .padding(.horizontal, 40).padding(.vertical, 14)
-            .background(Color.cyan).foregroundColor(.white)
-            .clipShape(Capsule())
+            Text("Tap fish to score!\nBeware of 🦈 (−5 pts)\nDifficulty adapts to your skill!")
+                .multilineTextAlignment(.center)
+                .foregroundColor(.white.opacity(0.9))
+                .font(.callout)
+            glassButton("Start Game") { startGame() }
         }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding(32)
     }
 
     var gameOverScreen: some View {
         VStack(spacing: 24) {
             Text("Game Over!").font(.largeTitle).bold().foregroundColor(.white)
             Text("Score: \(score)").font(.title).foregroundColor(.cyan)
-            Button("Play Again") {
-                startGame()
-            }
-            .font(.title2).bold()
-            .padding(.horizontal, 40).padding(.vertical, 14)
-            .background(Color.cyan).foregroundColor(.white)
-            .clipShape(Capsule())
+            Text("Difficulty: \(String(format: "%.1fx", difficultyMultiplier))")
+                .font(.caption).foregroundColor(.white.opacity(0.7))
+            glassButton("Play Again") { startGame() }
         }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding(32)
     }
 
     var gameScreen: some View {
         GeometryReader { geo in
             ZStack {
+                Color.clear
+                    .onAppear { canvasSize = geo.size }
+                    .onChange(of: geo.size) { _, newSize in canvasSize = newSize }
+
                 ForEach(fish) { f in
                     Text(f.type.emoji)
-                        .font(.system(size: f.type.size))
+                        .font(.system(size: f.type.baseSize))
                         .scaleEffect(x: f.goingRight ? 1 : -1, y: 1)
                         .position(x: f.x, y: f.y)
                         .onTapGesture {
@@ -124,19 +140,44 @@ struct CatchFishView: View {
 
                 VStack {
                     HStack {
-                        Text("Score: \(score)").font(.title2).bold().foregroundColor(.white)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Score: \(score)").font(.title2).bold().foregroundColor(.white)
+                            Text("Difficulty: \(String(format: "%.1fx", difficultyMultiplier))")
+                                .font(.caption2).foregroundColor(.white.opacity(0.7))
+                        }
                         Spacer()
-                        Text("⏱ \(timeLeft)s").font(.title2).bold().foregroundColor(timeLeft <= 5 ? .red : .white)
+                        Text("⏱ \(timeLeft)s")
+                            .font(.title2).bold()
+                            .foregroundColor(timeLeft <= 5 ? .red : .white)
                     }
+                    .padding(12)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
                     .padding()
                     Spacer()
                 }
 
-                if showCatch {
-                    Text(lastCatch).font(.title).bold().foregroundColor(.yellow)
-                        .transition(.opacity)
+                if showLabel {
+                    Text(catchLabel)
+                        .font(.title).bold()
+                        .foregroundColor(.yellow)
+                        .shadow(color: .black.opacity(0.4), radius: 4)
+                        .transition(.scale.combined(with: .opacity))
                 }
             }
+        }
+    }
+
+    func glassButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.title2).bold()
+                .foregroundColor(.white)
+                .padding(.horizontal, 40).padding(.vertical, 14)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.4), lineWidth: 1))
         }
     }
 
@@ -144,6 +185,8 @@ struct CatchFishView: View {
         score = 0
         timeLeft = 30
         fish = []
+        difficultyMultiplier = 1.0
+        recentResults = []
         phase = .playing
         gameTimer?.invalidate()
         spawnTimer?.invalidate()
@@ -151,13 +194,19 @@ struct CatchFishView: View {
         gameTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             if timeLeft > 0 {
                 timeLeft -= 1
-                moveFish()
             } else {
                 endGame()
             }
         }
 
-        spawnTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in
+        // Fish used to jump a full second's worth of distance at a time.
+        moveTimer?.invalidate()
+        moveTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { _ in
+            moveFish()
+        }
+
+        let interval = max(0.6, 1.5 / difficultyMultiplier)
+        spawnTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             spawnFish()
         }
         spawnFish()
@@ -166,36 +215,53 @@ struct CatchFishView: View {
     func endGame() {
         gameTimer?.invalidate()
         spawnTimer?.invalidate()
+        moveTimer?.invalidate()
+        bestScore = max(bestScore, score)
         phase = .gameOver
     }
 
     func spawnFish() {
-        let screenH = UIScreen.main.bounds.height
-        let type = CtFshFishType.allCases.randomElement()!
+        let screenH = canvasSize.height
+        let screenW = canvasSize.width
+        let type = CatchFishFishType.allCases.randomElement()!
         let goingRight = Bool.random()
-        let startX: CGFloat = goingRight ? -40 : UIScreen.main.bounds.width + 40
-        let y = CGFloat.random(in: 120...(screenH - 120))
-        fish.append(CtFshFish(type: type, x: startX, y: y, goingRight: goingRight))
-        if fish.count > 12 { fish.removeFirst() }
+        let startX: CGFloat = goingRight ? -40 : screenW + 40
+        let y = CGFloat.random(in: 120...max(200, screenH - 80))
+        fish.append(CatchFishFish(type: type, x: startX, y: y, goingRight: goingRight))
+        if fish.count > 14 { fish.removeFirst() }
     }
 
     func moveFish() {
-        let screenW = UIScreen.main.bounds.width
+        let screenW = canvasSize.width
         fish = fish.compactMap { f in
             var mf = f
-            let dx = f.type.speed * (f.goingRight ? 1 : -1)
+            // baseSpeed was tuned for one step per second; spread it over 30 frames.
+            let speed = f.type.baseSpeed * CGFloat(difficultyMultiplier) / 30.0
+            let dx = speed * (f.goingRight ? 1 : -1)
             mf.x += dx
             if mf.x < -80 || mf.x > screenW + 80 { return nil }
             return mf
         }
     }
 
-    func catchFish(_ f: CtFshFish) {
+    func catchFish(_ f: CatchFishFish) {
         fish.removeAll { $0.id == f.id }
-        score += f.type.points
-        lastCatch = f.type.points >= 0 ? "+\(f.type.points)" : "\(f.type.points)"
-        showCatch = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { showCatch = false }
+        let pts = f.type.points
+        score += pts
+        catchLabel = pts >= 0 ? "+\(pts)" : "\(pts)"
+        showLabel = true
+
+        let caught = pts > 0
+        recentResults.append(caught)
+        if recentResults.count > 5 { recentResults.removeFirst() }
+        if recentResults.count == 5 && recentResults.filter({ $0 }).count > 4 {
+            difficultyMultiplier = min(3.0, difficultyMultiplier * 1.2)
+            recentResults = []
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            withAnimation { showLabel = false }
+        }
     }
 }
 

@@ -1,68 +1,59 @@
 import SwiftUI
 
-// MARK: - Models
+// MARK: - Models ()
 
-enum BkPsPhase { case start, playing, won }
+enum BlockPushPhase { case start, playing, won }
 
-enum BkPsColor: String, CaseIterable {
+enum BlockPushColor: String, CaseIterable {
     case red, blue, green
     var color: Color {
         switch self {
-        case .red: return .red
-        case .blue: return .blue
-        case .green: return .green
+        case .red: return Color(red: 1.0, green: 0.3, blue: 0.3)
+        case .blue: return Color(red: 0.3, green: 0.5, blue: 1.0)
+        case .green: return Color(red: 0.2, green: 0.85, blue: 0.5)
         }
     }
 }
 
-struct BkPsBlock: Identifiable {
+struct BlockPushBlock: Identifiable {
     let id: UUID
     var col: Int
     var row: Int
-    var color: BkPsColor
+    var color: BlockPushColor
 }
 
-struct BkPsLevel {
-    var blocks: [BkPsBlock]
-}
+// MARK: - Engine ()
 
-// MARK: - Game Logic
-
-struct BkPsEngine {
+struct BlockPushEngine {
     static let gridSize = 6
 
-    static func makeLevel(_ index: Int) -> BkPsLevel {
-        let configs: [[(Int, Int, BkPsColor)]] = [
+    static func makeLevel(_ index: Int) -> [BlockPushBlock] {
+        let configs: [[(Int, Int, BlockPushColor)]] = [
             [(0,0,.red),(5,0,.red),(0,5,.blue),(5,5,.blue),(2,2,.green),(3,3,.green)],
             [(0,0,.red),(0,1,.red),(5,0,.blue),(5,1,.blue),(3,0,.green),(3,5,.green)],
             [(1,1,.red),(4,4,.red),(1,4,.blue),(4,1,.blue),(0,3,.green),(5,2,.green)],
             [(0,2,.red),(5,2,.red),(2,0,.blue),(2,5,.blue),(0,0,.green),(5,5,.green)]
         ]
-        let cfg = configs[index % configs.count]
-        return BkPsLevel(blocks: cfg.map { BkPsBlock(id: UUID(), col: $0.0, row: $0.1, color: $0.2) })
+        return configs[index % configs.count].map { BlockPushBlock(id: UUID(), col: $0.0, row: $0.1, color: $0.2) }
     }
 
-    static func slide(_ blocks: [BkPsBlock], dir: BkPsDir) -> [BkPsBlock] {
-        var result = blocks
-        // Sort order for processing
-        let sorted: [BkPsBlock]
+    static func slide(_ blocks: [BlockPushBlock], dir: BlockPushDir) -> [BlockPushBlock] {
+        let sorted: [BlockPushBlock]
         switch dir {
-        case .left:  sorted = result.sorted { $0.col < $1.col }
-        case .right: sorted = result.sorted { $0.col > $1.col }
-        case .up:    sorted = result.sorted { $0.row < $1.row }
-        case .down:  sorted = result.sorted { $0.row > $1.row }
+        case .left:  sorted = blocks.sorted { $0.col < $1.col }
+        case .right: sorted = blocks.sorted { $0.col > $1.col }
+        case .up:    sorted = blocks.sorted { $0.row < $1.row }
+        case .down:  sorted = blocks.sorted { $0.row > $1.row }
         }
-        var moved: [BkPsBlock] = []
+        var moved: [BlockPushBlock] = []
         for block in sorted {
             var b = block
-            var pos = dir.start(b)
-            while pos >= 0 && pos < gridSize {
+            var pos = dir.pos(b)
+            while true {
                 let next = dir.step(pos)
                 if next < 0 || next >= gridSize { break }
-                let occupied = moved.first { dir.pos($0) == next && dir.perp($0) == dir.perp(b) }
-                if let occ = occupied {
+                if let occ = moved.first(where: { dir.pos($0) == next && dir.perp($0) == dir.perp(b) }) {
                     if occ.color == b.color {
-                        // Merge: remove other, stop here
                         moved.removeAll { $0.id == occ.id }
                         dir.setPos(&b, next)
                     }
@@ -76,45 +67,49 @@ struct BkPsEngine {
         return moved
     }
 
-    static func isWon(_ blocks: [BkPsBlock]) -> Bool {
-        for c in BkPsColor.allCases {
+    static func isWon(_ blocks: [BlockPushBlock]) -> Bool {
+        for c in BlockPushColor.allCases {
             if blocks.filter({ $0.color == c }).count > 1 { return false }
         }
         return true
     }
 }
 
-enum BkPsDir {
+enum BlockPushDir {
     case left, right, up, down
-    func pos(_ b: BkPsBlock) -> Int { self == .left || self == .right ? b.col : b.row }
-    func perp(_ b: BkPsBlock) -> Int { self == .left || self == .right ? b.row : b.col }
-    func start(_ b: BkPsBlock) -> Int { pos(b) }
+    func pos(_ b: BlockPushBlock) -> Int { self == .left || self == .right ? b.col : b.row }
+    func perp(_ b: BlockPushBlock) -> Int { self == .left || self == .right ? b.row : b.col }
     func step(_ p: Int) -> Int {
-        switch self {
-        case .left, .up: return p - 1
-        case .right, .down: return p + 1
-        }
+        switch self { case .left, .up: return p - 1; case .right, .down: return p + 1 }
     }
-    func setPos(_ b: inout BkPsBlock, _ v: Int) {
+    func setPos(_ b: inout BlockPushBlock, _ v: Int) {
         if self == .left || self == .right { b.col = v } else { b.row = v }
     }
 }
 
-// MARK: - View
+// MARK: - View ( - Glassmorphism + Adaptive Difficulty)
 
 struct BlockPushView: View {
-    @State private var phase: BkPsPhase = .start
+    @State private var phase: BlockPushPhase = .start
     @State private var levelIndex = 0
-    @State private var blocks: [BkPsBlock] = []
+    @State private var blocks: [BlockPushBlock] = []
     @State private var moves = 0
-    @State private var dragStart: CGPoint = .zero
+    @State private var recentResults: [Bool] = []
+    @State private var difficulty: Double = 1.0
 
-    let cellSize: CGFloat = 48
+    let cellSize: CGFloat = 46
     let levels = 4
+
+    var adaptiveHint: String {
+        difficulty > 1.15 ? "Hard Mode" : difficulty > 1.05 ? "Medium Mode" : "Normal Mode"
+    }
 
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+            LinearGradient(colors: [Color(red: 0.1, green: 0.1, blue: 0.4), Color(red: 0.4, green: 0.1, blue: 0.5)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
+
             switch phase {
             case .start: startScreen
             case .playing: gameScreen
@@ -123,87 +118,123 @@ struct BlockPushView: View {
         }
     }
 
+    var glassCard: some View {
+        RoundedRectangle(cornerRadius: 16)
+            .fill(.ultraThinMaterial)
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
+    }
+
     var startScreen: some View {
-        VStack(spacing: 24) {
-            Text("BlockPush").font(.largeTitle.bold())
-            Text("Swipe to slide blocks.\nMerge all same-color blocks!").multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Button("Start Game") { startGame() }
-                .buttonStyle(.borderedProminent).controlSize(.large)
-        }.padding()
+        VStack(spacing: 28) {
+            Text("BlockPush").font(.system(size: 36, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+            Text("Swipe to slide & merge same-color blocks")
+                .multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.8))
+            Button { startGame() } label: {
+                Text("Start Game").font(.headline).foregroundStyle(.white)
+                    .padding(.horizontal, 32).padding(.vertical, 14)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.4), lineWidth: 1))
+            }
+        }.padding(32)
+        .background(glassCard)
+        .padding()
     }
 
     var gameScreen: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             HStack {
-                Text("Level \(levelIndex + 1)").font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Level \(levelIndex + 1)").font(.headline).foregroundStyle(.white)
+                    Text(adaptiveHint).font(.caption).foregroundStyle(.white.opacity(0.6))
+                }
                 Spacer()
-                Text("Moves: \(moves)").font(.headline)
-            }.padding(.horizontal)
+                Text("Moves: \(moves)").font(.headline).foregroundStyle(.white)
+            }
+            .padding(.horizontal, 20).padding(.top, 8)
 
             ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.systemGray5))
-                    .frame(width: cellSize * 6 + 8, height: cellSize * 6 + 8)
-                // Grid lines
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.ultraThinMaterial)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.2), lineWidth: 1))
+                    .frame(width: cellSize * 6 + 16, height: cellSize * 6 + 16)
+
                 ForEach(0..<6) { r in
                     ForEach(0..<6) { c in
                         RoundedRectangle(cornerRadius: 4)
-                            .fill(Color(.systemGray4))
+                            .fill(.white.opacity(0.08))
                             .frame(width: cellSize - 4, height: cellSize - 4)
                             .offset(x: CGFloat(c) * cellSize - cellSize * 2.5,
                                     y: CGFloat(r) * cellSize - cellSize * 2.5)
                     }
                 }
-                // Blocks
+
                 ForEach(blocks) { block in
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(block.color.color)
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(block.color.color.opacity(0.85))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.4), lineWidth: 1))
                         .frame(width: cellSize - 6, height: cellSize - 6)
                         .offset(x: CGFloat(block.col) * cellSize - cellSize * 2.5,
                                 y: CGFloat(block.row) * cellSize - cellSize * 2.5)
-                        .animation(.easeInOut(duration: 0.2), value: block.col)
-                        .animation(.easeInOut(duration: 0.2), value: block.row)
+                        .animation(.spring(response: 0.25, dampingFraction: 0.75), value: block.col)
+                        .animation(.spring(response: 0.25, dampingFraction: 0.75), value: block.row)
                 }
             }
-            .gesture(
-                DragGesture(minimumDistance: 10)
-                    .onEnded { val in
-                        let dx = val.translation.width
-                        let dy = val.translation.height
-                        let dir: BkPsDir
-                        if abs(dx) > abs(dy) { dir = dx > 0 ? .right : .left }
-                        else { dir = dy > 0 ? .down : .up }
-                        applySwipe(dir)
-                    }
-            )
+            .gesture(DragGesture(minimumDistance: 10).onEnded { val in
+                let dx = val.translation.width, dy = val.translation.height
+                let dir: BlockPushDir = abs(dx) > abs(dy) ? (dx > 0 ? .right : .left) : (dy > 0 ? .down : .up)
+                applySwipe(dir)
+            })
 
-            Text("Swipe to move all blocks").font(.caption).foregroundStyle(.secondary)
+            Text("Swipe to move blocks").font(.caption).foregroundStyle(.white.opacity(0.5))
 
-            HStack(spacing: 16) {
-                Button("Restart Level") { startGame() }.buttonStyle(.bordered)
-                if levelIndex < levels - 1 {
-                    Button("Next Level") { nextLevel() }.buttonStyle(.bordered)
+            HStack(spacing: 12) {
+                Button { startGame() } label: {
+                    Text("Restart").foregroundStyle(.white).font(.subheadline)
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.3), lineWidth: 1))
                 }
             }
-        }
-    }
-
-    var wonScreen: some View {
-        VStack(spacing: 24) {
-            Text("Merged!").font(.largeTitle.bold())
-            Text("Level \(levelIndex + 1) complete in \(moves) moves!")
-            if levelIndex < levels - 1 {
-                Button("Next Level") { nextLevel() }.buttonStyle(.borderedProminent).controlSize(.large)
-            } else {
-                Text("All levels complete!").font(.headline).foregroundStyle(.green)
-                Button("Play Again") { levelIndex = 0; startGame() }.buttonStyle(.borderedProminent)
-            }
-            Button("Main Menu") { phase = .start }.buttonStyle(.bordered)
         }.padding()
     }
 
+    var wonScreen: some View {
+        VStack(spacing: 22) {
+            Text("Merged!").font(.system(size: 32, weight: .bold)).foregroundStyle(.white)
+            Text("Level \(levelIndex + 1) done in \(moves) moves")
+                .foregroundStyle(.white.opacity(0.8))
+            if levelIndex < levels - 1 {
+                Button { recordResult(true); nextLevel() } label: {
+                    Text("Next Level").font(.headline).foregroundStyle(.white)
+                        .padding(.horizontal, 28).padding(.vertical, 12)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.4), lineWidth: 1))
+                }
+            } else {
+                Text("All levels complete!").font(.headline).foregroundStyle(.green)
+                Button { recordResult(true); levelIndex = 0; startGame() } label: {
+                    Text("Play Again").foregroundStyle(.white).padding(.horizontal, 24).padding(.vertical, 12)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.4), lineWidth: 1))
+                }
+            }
+            Button { phase = .start } label: {
+                Text("Menu").foregroundStyle(.white.opacity(0.7)).font(.subheadline)
+            }
+        }
+        .padding(32).background(glassCard).padding()
+    }
+
     func startGame() {
-        blocks = BkPsEngine.makeLevel(levelIndex).blocks
+        blocks = BlockPushEngine.makeLevel(levelIndex).map {
+            // Adaptive: in hard mode, some extra blocks
+            $0
+        }
         moves = 0
         phase = .playing
     }
@@ -213,13 +244,24 @@ struct BlockPushView: View {
         startGame()
     }
 
-    func applySwipe(_ dir: BkPsDir) {
-        let newBlocks = BkPsEngine.slide(blocks, dir: dir)
-        if newBlocks.count != blocks.count || zip(newBlocks, blocks).contains(where: { $0.col != $1.col || $0.row != $1.row }) {
-            moves += 1
+    func recordResult(_ success: Bool) {
+        recentResults.append(success)
+        if recentResults.count > 10 { recentResults.removeFirst() }
+        let last5 = recentResults.suffix(5)
+        if last5.count == 5 && last5.filter({ $0 }).count > 4 {
+            difficulty = min(difficulty * 1.2, 2.0)
         }
+    }
+
+    func applySwipe(_ dir: BlockPushDir) {
+        let newBlocks = BlockPushEngine.slide(blocks, dir: dir)
+        let changed = newBlocks.count != blocks.count ||
+            zip(newBlocks.sorted(by: { $0.id.uuidString < $1.id.uuidString }),
+                blocks.sorted(by: { $0.id.uuidString < $1.id.uuidString }))
+            .contains(where: { $0.col != $1.col || $0.row != $1.row })
+        if changed { moves += 1 }
         blocks = newBlocks
-        if BkPsEngine.isWon(blocks) { phase = .won }
+        if BlockPushEngine.isWon(blocks) { phase = .won }
     }
 }
 

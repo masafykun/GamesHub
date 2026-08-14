@@ -1,38 +1,48 @@
 import SwiftUI
 
-enum OrbGamePhase {
+enum OrbitPhase {
     case start, playing, gameOver
 }
 
-struct OrbSatellite: Identifiable {
+struct OrbitSatellite: Identifiable {
     let id = UUID()
     var position: CGPoint
     var velocity: CGVector
     var isAlive: Bool = true
     var stableTime: Double = 0.0
     var scored: Bool = false
+    var trail: [CGPoint] = []
 }
 
 struct OrbitView: View {
-    @State private var phase: OrbGamePhase = .start
-    @State private var satellites: [OrbSatellite] = []
+    @State private var phase: OrbitPhase = .start
+    @State private var satellites: [OrbitSatellite] = []
     @State private var score: Int = 0
     @State private var launchCount: Int = 0
     @State private var timer: Timer?
     @State private var lastTime: Date = Date()
     @State private var planetPos: CGPoint = .zero
-    @State private var canvasSize: CGSize = .zero
+    @State private var recentResults: [Bool] = []
+    @State private var difficultyMultiplier: Double = 1.0
 
     let maxLaunches = 5
     let planetRadius: CGFloat = 40
     let satelliteRadius: CGFloat = 8
-    let GM: Double = 8000.0
-    let escapeDistance: Double = 400.0
+    let baseGM: Double = 8000.0
+    let baseEscape: Double = 400.0
     let stableThreshold: Double = 5.0
+
+    var GM: Double { baseGM * difficultyMultiplier }
+    var escapeDistance: Double { baseEscape / difficultyMultiplier }
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            LinearGradient(
+                colors: [Color(red: 0.05, green: 0.05, blue: 0.25),
+                         Color(red: 0.15, green: 0.05, blue: 0.35)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ).ignoresSafeArea()
 
             if phase == .start {
                 startScreen
@@ -45,51 +55,80 @@ struct OrbitView: View {
     }
 
     var startScreen: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 28) {
             Text("ORBIT")
-                .font(.system(size: 52, weight: .bold, design: .monospaced))
-                .foregroundColor(.cyan)
-            Text("Tap to launch satellites\ninto stable orbit")
+                .font(.system(size: 56, weight: .bold, design: .rounded))
+                .foregroundStyle(LinearGradient(colors: [.cyan, .purple], startPoint: .leading, endPoint: .trailing))
+            Text("Tap to launch satellites into stable orbit\nHold for 5 seconds to score a point")
                 .multilineTextAlignment(.center)
-                .foregroundColor(.gray)
-            Text("Keep orbit stable for 5 sec = +1 score")
-                .font(.caption)
-                .foregroundColor(.gray.opacity(0.7))
-            Button("LAUNCH") {
-                startGame()
+                .foregroundColor(.white.opacity(0.7))
+                .font(.subheadline)
+            if difficultyMultiplier > 1.0 {
+                Text("Difficulty: x\(String(format: "%.1f", difficultyMultiplier))")
+                    .font(.caption)
+                    .foregroundColor(.orange.opacity(0.8))
+                    .padding(.horizontal, 12).padding(.vertical, 4)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
             }
-            .font(.headline)
-            .foregroundColor(.black)
-            .padding(.horizontal, 40)
-            .padding(.vertical, 14)
-            .background(Color.cyan)
-            .cornerRadius(10)
+            Button("BEGIN MISSION") { startGame() }
+                .font(.headline)
+                .foregroundColor(.white)
+                .padding(.horizontal, 44)
+                .padding(.vertical, 14)
+                .background(LinearGradient(colors: [.cyan, .blue], startPoint: .leading, endPoint: .trailing))
+                .clipShape(Capsule())
+                .shadow(color: .cyan.opacity(0.4), radius: 12)
         }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding(32)
     }
 
     var gameScreen: some View {
         GeometryReader { geo in
             ZStack {
-                // Stars background
-                ForEach(0..<50, id: \.self) { i in
+                // Starfield
+                ForEach(0..<60, id: \.self) { i in
                     Circle()
-                        .fill(Color.white.opacity(0.5))
-                        .frame(width: 2, height: 2)
-                        .position(x: CGFloat((i * 137) % Int(geo.size.width)),
-                                  y: CGFloat((i * 97 + 40) % Int(geo.size.height)))
+                        .fill(Color.white.opacity(Double((i % 5) + 1) / 10.0))
+                        .frame(width: CGFloat((i % 3) + 1), height: CGFloat((i % 3) + 1))
+                        .position(x: CGFloat((i * 173) % Int(geo.size.width)),
+                                  y: CGFloat((i * 113 + 60) % Int(geo.size.height)))
+                }
+
+                // Satellite trails
+                ForEach(satellites) { sat in
+                    if sat.isAlive && sat.trail.count > 1 {
+                        OrbTrailShape(points: sat.trail)
+                            .stroke(
+                                LinearGradient(colors: [.cyan.opacity(0), .cyan.opacity(0.5)],
+                                               startPoint: .leading, endPoint: .trailing),
+                                lineWidth: 1.5
+                            )
+                    }
                 }
 
                 // Planet
                 ZStack {
                     Circle()
-                        .fill(RadialGradient(colors: [.blue, .indigo, .purple.opacity(0.6)],
-                                             center: .topLeading,
-                                             startRadius: 5,
-                                             endRadius: 60))
+                        .fill(RadialGradient(
+                            colors: [.cyan.opacity(0.8), .blue.opacity(0.6), .purple.opacity(0.3)],
+                            center: .topLeading, startRadius: 5, endRadius: 80
+                        ))
                         .frame(width: planetRadius * 2, height: planetRadius * 2)
                     Circle()
-                        .stroke(Color.cyan.opacity(0.5), lineWidth: 2)
+                        .stroke(.white.opacity(0.2), lineWidth: 1)
                         .frame(width: planetRadius * 2, height: planetRadius * 2)
+                    // Gravity ring
+                    Circle()
+                        .stroke(.cyan.opacity(0.1), lineWidth: 1)
+                        .frame(width: 150, height: 150)
+                    Circle()
+                        .stroke(.cyan.opacity(0.07), lineWidth: 1)
+                        .frame(width: 250, height: 250)
                 }
                 .position(planetPos)
 
@@ -100,10 +139,18 @@ struct OrbitView: View {
                             Circle()
                                 .fill(sat.scored ? Color.yellow : Color.white)
                                 .frame(width: satelliteRadius * 2, height: satelliteRadius * 2)
+                                .shadow(color: sat.scored ? .yellow : .white, radius: 4)
                             if sat.scored {
                                 Circle()
-                                    .stroke(Color.yellow.opacity(0.6), lineWidth: 3)
-                                    .frame(width: satelliteRadius * 2 + 6, height: satelliteRadius * 2 + 6)
+                                    .stroke(Color.yellow.opacity(0.5), lineWidth: 2)
+                                    .frame(width: 22, height: 22)
+                            } else {
+                                // Progress ring
+                                Circle()
+                                    .trim(from: 0, to: CGFloat(sat.stableTime / stableThreshold))
+                                    .stroke(.cyan.opacity(0.8), lineWidth: 2)
+                                    .frame(width: 22, height: 22)
+                                    .rotationEffect(.degrees(-90))
                             }
                         }
                         .position(sat.position)
@@ -113,13 +160,33 @@ struct OrbitView: View {
                 // HUD
                 VStack {
                     HStack {
-                        Text("SCORE: \(score)")
-                            .font(.system(.headline, design: .monospaced))
-                            .foregroundColor(.cyan)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("SCORE")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.5))
+                            Text("\(score)")
+                                .font(.system(size: 28, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyan)
+                        }
+                        .padding(12)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.3), lineWidth: 1))
+
                         Spacer()
-                        Text("LAUNCHES: \(launchCount)/\(maxLaunches)")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundColor(.gray)
+
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("LAUNCHES")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.5))
+                            Text("\(launchCount)/\(maxLaunches)")
+                                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.white)
+                        }
+                        .padding(12)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.3), lineWidth: 1))
                     }
                     .padding()
                     Spacer()
@@ -130,34 +197,47 @@ struct OrbitView: View {
                 handleTap(at: location, in: geo.size)
             }
             .onAppear {
-                canvasSize = geo.size
                 planetPos = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
             }
         }
     }
 
     var gameOverScreen: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 20) {
             Text("MISSION COMPLETE")
-                .font(.system(size: 28, weight: .bold, design: .monospaced))
-                .foregroundColor(.cyan)
-            Text("SCORE: \(score) / \(maxLaunches)")
-                .font(.system(size: 40, weight: .bold, design: .monospaced))
+                .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
-            Button("RETRY") {
-                startGame()
+            Text("\(score)")
+                .font(.system(size: 72, weight: .bold, design: .monospaced))
+                .foregroundStyle(LinearGradient(colors: [.cyan, .yellow], startPoint: .top, endPoint: .bottom))
+            Text("out of \(maxLaunches) stable orbits")
+                .foregroundColor(.white.opacity(0.6))
+            if difficultyMultiplier > 1.0 {
+                Text("Difficulty: x\(String(format: "%.1f", difficultyMultiplier))")
+                    .font(.caption)
+                    .foregroundColor(.orange)
             }
-            .font(.headline)
-            .foregroundColor(.black)
-            .padding(.horizontal, 40)
-            .padding(.vertical, 14)
-            .background(Color.cyan)
-            .cornerRadius(10)
-            Button("MENU") {
-                phase = .start
+            HStack(spacing: 16) {
+                Button("RETRY") { startGame() }
+                    .font(.headline)
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 32).padding(.vertical, 12)
+                    .background(.cyan)
+                    .clipShape(Capsule())
+                Button("MENU") { phase = .start }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 32).padding(.vertical, 12)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.3), lineWidth: 1))
             }
-            .foregroundColor(.gray)
         }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
+        .padding(32)
     }
 
     func startGame() {
@@ -178,11 +258,11 @@ struct OrbitView: View {
         let dy = Double(location.y - planetPos.y)
         let dist = sqrt(dx * dx + dy * dy)
         guard dist > Double(planetRadius) + Double(satelliteRadius) + 5 else { return }
-        // Tangent velocity perpendicular to radius
         let speed = sqrt(GM / dist) * 0.85
         let vx = -dy / dist * speed
         let vy = dx / dist * speed
-        let sat = OrbSatellite(position: location, velocity: CGVector(dx: vx, dy: vy))
+        var sat = OrbitSatellite(position: location, velocity: CGVector(dx: vx, dy: vy))
+        sat.trail = [location]
         satellites.append(sat)
         launchCount += 1
     }
@@ -199,48 +279,76 @@ struct OrbitView: View {
             let distSq = dx * dx + dy * dy
             let dist = sqrt(distSq)
 
-            // Crash check
             if dist < Double(planetRadius) + Double(satelliteRadius) {
                 satellites[i].isAlive = false
+                recordResult(scored: satellites[i].scored)
                 checkGameOver()
                 continue
             }
-
-            // Escape check
             if dist > escapeDistance {
                 satellites[i].isAlive = false
+                recordResult(scored: false)
                 checkGameOver()
                 continue
             }
 
-            // Gravity acceleration
             let grav = GM / distSq
             let ax = grav * dx / dist
             let ay = grav * dy / dist
-
             satellites[i].velocity.dx += ax * dt
             satellites[i].velocity.dy += ay * dt
             satellites[i].position.x += CGFloat(satellites[i].velocity.dx * dt)
             satellites[i].position.y += CGFloat(satellites[i].velocity.dy * dt)
 
-            // Stable time tracking
+            // Update trail
+            if satellites[i].trail.count == 0 || dist > 2 {
+                satellites[i].trail.append(satellites[i].position)
+                if satellites[i].trail.count > 40 {
+                    satellites[i].trail.removeFirst()
+                }
+            }
+
             if !satellites[i].scored {
                 satellites[i].stableTime += dt
                 if satellites[i].stableTime >= stableThreshold {
                     satellites[i].scored = true
                     score += 1
+                    recordResult(scored: true)
+                    // Retire it once the orbit is confirmed, otherwise a stable
+                    // satellite would keep the round alive forever.
+                    satellites[i].isAlive = false
+                    checkGameOver()
                 }
             }
         }
     }
 
+    func recordResult(scored: Bool) {
+        recentResults.append(scored)
+        if recentResults.count > 10 { recentResults.removeFirst() }
+        let lastFive = recentResults.suffix(5)
+        if lastFive.count == 5 && lastFive.filter({ $0 }).count > 4 {
+            difficultyMultiplier = min(difficultyMultiplier * 1.2, 3.0)
+        }
+    }
+
     func checkGameOver() {
         let active = satellites.filter { $0.isAlive }.count
-        let remaining = maxLaunches - launchCount
-        if active == 0 && remaining == 0 {
+        if active == 0 && launchCount >= maxLaunches {
             timer?.invalidate()
             phase = .gameOver
         }
+    }
+}
+
+struct OrbTrailShape: Shape {
+    var points: [CGPoint]
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard points.count > 1 else { return path }
+        path.move(to: points[0])
+        for pt in points.dropFirst() { path.addLine(to: pt) }
+        return path
     }
 }
 

@@ -1,8 +1,8 @@
 import SwiftUI
 
-// MARK: - Models
+// MARK: - Models ( prefixed to avoid conflict)
 
-struct PkCar: Identifiable {
+struct ParkingCar: Identifiable {
     let id: Int
     var col: Int
     var row: Int
@@ -11,81 +11,80 @@ struct PkCar: Identifiable {
     let isTarget: Bool
 }
 
-struct PkPuzzle {
-    let cars: [PkCar]
+struct ParkingPuzzle {
+    let cars: [ParkingCar]
 }
 
-// MARK: - Game Logic
-
-private let pkPuzzles: [PkPuzzle] = [
-    PkPuzzle(cars: [
-        PkCar(id: 0, col: 0, row: 2, length: 2, isHorizontal: true, isTarget: true),
-        PkCar(id: 1, col: 2, row: 0, length: 2, isHorizontal: false, isTarget: false),
-        PkCar(id: 2, col: 3, row: 0, length: 3, isHorizontal: false, isTarget: false),
-        PkCar(id: 3, col: 4, row: 3, length: 2, isHorizontal: true, isTarget: false),
-        PkCar(id: 4, col: 0, row: 4, length: 3, isHorizontal: true, isTarget: false),
+private let parkingPuzzles: [ParkingPuzzle] = [
+    ParkingPuzzle(cars: [
+        ParkingCar(id: 0, col: 0, row: 2, length: 2, isHorizontal: true, isTarget: true),
+        ParkingCar(id: 1, col: 2, row: 0, length: 2, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 2, col: 3, row: 0, length: 3, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 3, col: 4, row: 3, length: 2, isHorizontal: true, isTarget: false),
+        ParkingCar(id: 4, col: 0, row: 4, length: 3, isHorizontal: true, isTarget: false),
     ]),
-    PkPuzzle(cars: [
-        PkCar(id: 0, col: 1, row: 2, length: 2, isHorizontal: true, isTarget: true),
-        PkCar(id: 1, col: 3, row: 0, length: 3, isHorizontal: false, isTarget: false),
-        PkCar(id: 2, col: 0, row: 0, length: 2, isHorizontal: true, isTarget: false),
-        PkCar(id: 3, col: 4, row: 1, length: 2, isHorizontal: false, isTarget: false),
-        PkCar(id: 4, col: 1, row: 4, length: 2, isHorizontal: true, isTarget: false),
-        PkCar(id: 5, col: 5, row: 3, length: 3, isHorizontal: false, isTarget: false),
+    ParkingPuzzle(cars: [
+        ParkingCar(id: 0, col: 1, row: 2, length: 2, isHorizontal: true, isTarget: true),
+        ParkingCar(id: 1, col: 3, row: 0, length: 3, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 2, col: 0, row: 0, length: 2, isHorizontal: true, isTarget: false),
+        ParkingCar(id: 3, col: 4, row: 1, length: 2, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 4, col: 1, row: 4, length: 2, isHorizontal: true, isTarget: false),
+        ParkingCar(id: 5, col: 5, row: 3, length: 3, isHorizontal: false, isTarget: false),
     ]),
-    PkPuzzle(cars: [
-        PkCar(id: 0, col: 0, row: 2, length: 2, isHorizontal: true, isTarget: true),
-        PkCar(id: 1, col: 2, row: 1, length: 3, isHorizontal: false, isTarget: false),
-        PkCar(id: 2, col: 3, row: 0, length: 2, isHorizontal: true, isTarget: false),
-        PkCar(id: 3, col: 4, row: 2, length: 2, isHorizontal: false, isTarget: false),
-        PkCar(id: 4, col: 0, row: 4, length: 2, isHorizontal: true, isTarget: false),
-        PkCar(id: 5, col: 3, row: 4, length: 2, isHorizontal: true, isTarget: false),
+    ParkingPuzzle(cars: [
+        ParkingCar(id: 0, col: 0, row: 2, length: 2, isHorizontal: true, isTarget: true),
+        ParkingCar(id: 1, col: 2, row: 1, length: 3, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 2, col: 3, row: 0, length: 2, isHorizontal: true, isTarget: false),
+        ParkingCar(id: 3, col: 4, row: 2, length: 2, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 4, col: 0, row: 4, length: 2, isHorizontal: true, isTarget: false),
+        ParkingCar(id: 5, col: 3, row: 4, length: 2, isHorizontal: true, isTarget: false),
     ]),
-    PkPuzzle(cars: [
-        PkCar(id: 0, col: 0, row: 2, length: 2, isHorizontal: true, isTarget: true),
-        PkCar(id: 1, col: 2, row: 0, length: 2, isHorizontal: false, isTarget: false),
-        PkCar(id: 2, col: 3, row: 0, length: 2, isHorizontal: false, isTarget: false),
-        PkCar(id: 3, col: 4, row: 0, length: 2, isHorizontal: false, isTarget: false),
-        PkCar(id: 4, col: 0, row: 3, length: 3, isHorizontal: true, isTarget: false),
-        PkCar(id: 5, col: 4, row: 3, length: 3, isHorizontal: false, isTarget: false),
+    ParkingPuzzle(cars: [
+        ParkingCar(id: 0, col: 0, row: 2, length: 2, isHorizontal: true, isTarget: true),
+        ParkingCar(id: 1, col: 2, row: 0, length: 2, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 2, col: 3, row: 0, length: 2, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 3, col: 4, row: 0, length: 2, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 4, col: 0, row: 3, length: 3, isHorizontal: true, isTarget: false),
+        ParkingCar(id: 5, col: 4, row: 3, length: 3, isHorizontal: false, isTarget: false),
     ]),
-    PkPuzzle(cars: [
-        PkCar(id: 0, col: 0, row: 2, length: 2, isHorizontal: true, isTarget: true),
-        PkCar(id: 1, col: 2, row: 0, length: 3, isHorizontal: false, isTarget: false),
-        PkCar(id: 2, col: 3, row: 1, length: 2, isHorizontal: true, isTarget: false),
-        PkCar(id: 3, col: 5, row: 0, length: 3, isHorizontal: false, isTarget: false),
-        PkCar(id: 4, col: 0, row: 4, length: 2, isHorizontal: false, isTarget: false),
-        PkCar(id: 5, col: 2, row: 4, length: 2, isHorizontal: true, isTarget: false),
-        PkCar(id: 6, col: 4, row: 3, length: 2, isHorizontal: true, isTarget: false),
+    ParkingPuzzle(cars: [
+        ParkingCar(id: 0, col: 0, row: 2, length: 2, isHorizontal: true, isTarget: true),
+        ParkingCar(id: 1, col: 2, row: 0, length: 3, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 2, col: 3, row: 1, length: 2, isHorizontal: true, isTarget: false),
+        ParkingCar(id: 3, col: 5, row: 0, length: 3, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 4, col: 0, row: 4, length: 2, isHorizontal: false, isTarget: false),
+        ParkingCar(id: 5, col: 2, row: 4, length: 2, isHorizontal: true, isTarget: false),
+        ParkingCar(id: 6, col: 4, row: 3, length: 2, isHorizontal: true, isTarget: false),
     ]),
 ]
 
-enum PkPhase { case start, playing, won }
+enum ParkingPhase { case start, playing, won }
 
-// MARK: - Main View
+// MARK: - Main View 
 
 struct ParkingView: View {
-    @State private var phase: PkPhase = .start
+    @State private var phase: ParkingPhase = .start
     @State private var puzzleIndex = 0
-    @State private var cars: [PkCar] = []
+    @State private var cars: [ParkingCar] = []
     @State private var moves = 0
     @State private var dragCarID: Int? = nil
     @State private var dragOffset: CGFloat = 0
+    @State private var recentResults: [Bool] = []
+    @State private var difficultyMultiplier: Double = 1.0
 
     let gridSize = 6
-    let cellSize: CGFloat = 52
+    var cellSize: CGFloat { CGFloat(52 * (difficultyMultiplier > 1.4 ? 0.9 : 1.0)) }
 
     var body: some View {
         ZStack {
-            Color(red: 0.12, green: 0.14, blue: 0.18).ignoresSafeArea()
+            LinearGradient(colors: [Color(red: 0.1, green: 0.15, blue: 0.4), Color(red: 0.3, green: 0.1, blue: 0.5)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
 
             switch phase {
-            case .start:
-                startScreen
-            case .playing:
-                gameScreen
-            case .won:
-                wonScreen
+            case .start: startScreen
+            case .playing: gameScreen
+            case .won: wonScreen
             }
         }
         .animation(.easeInOut(duration: 0.3), value: phase)
@@ -94,61 +93,84 @@ struct ParkingView: View {
     // MARK: Screens
 
     var startScreen: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 28) {
             Text("PARKING")
-                .font(.system(size: 42, weight: .black, design: .monospaced))
+                .font(.system(size: 44, weight: .black, design: .rounded))
                 .foregroundColor(.white)
-            Text("Slide cars to free\nthe red car's path!")
-                .multilineTextAlignment(.center)
-                .foregroundColor(.gray)
-            Button(action: startGame) {
-                Text("START")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(.black)
-                    .frame(width: 160, height: 52)
-                    .background(Color.yellow)
-                    .cornerRadius(12)
-            }
+            Text("Slide cars to free the red car!")
+                .foregroundColor(.white.opacity(0.7))
+            glassButton("PLAY") { startGame() }
         }
+        .padding(32)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
     }
 
     var wonScreen: some View {
         VStack(spacing: 20) {
             Text("SOLVED!")
-                .font(.system(size: 40, weight: .black))
+                .font(.system(size: 38, weight: .black, design: .rounded))
                 .foregroundColor(.green)
             Text("Moves: \(moves)")
                 .foregroundColor(.white)
                 .font(.title2)
+            if difficultyMultiplier > 1.0 {
+                Text("Difficulty: \(String(format: "%.0f", (difficultyMultiplier - 1) * 100))% harder")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
             HStack(spacing: 16) {
-                Button("Next Puzzle") {
-                    puzzleIndex = (puzzleIndex + 1) % pkPuzzles.count
+                glassButton("Next") {
+                    recordResult(won: true)
+                    puzzleIndex = (puzzleIndex + 1) % parkingPuzzles.count
                     startGame()
                 }
-                .buttonStyle(PkButtonStyle(color: .blue))
-
-                Button("Restart") { startGame() }
-                    .buttonStyle(PkButtonStyle(color: .yellow))
+                glassButton("Retry") {
+                    recordResult(won: false)
+                    startGame()
+                }
             }
         }
+        .padding(28)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.3), lineWidth: 1))
     }
 
     var gameScreen: some View {
         VStack(spacing: 16) {
             HStack {
-                Text("Puzzle \(puzzleIndex + 1)/\(pkPuzzles.count)")
-                    .foregroundColor(.gray)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Puzzle \(puzzleIndex + 1)/\(parkingPuzzles.count)")
+                        .foregroundColor(.white.opacity(0.7))
+                        .font(.caption)
+                    Text("Moves: \(moves)")
+                        .foregroundColor(.white)
+                        .fontWeight(.bold)
+                }
                 Spacer()
-                Text("Moves: \(moves)")
-                    .foregroundColor(.white)
-                    .fontWeight(.bold)
+                if difficultyMultiplier > 1.0 {
+                    Text("LVL \(String(format: "%.1f", difficultyMultiplier))x")
+                        .font(.caption.bold())
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(.orange.opacity(0.5), lineWidth: 1))
+                }
             }
             .padding(.horizontal)
 
             gridView
+                .padding()
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
+                .padding(.horizontal)
 
-            Button("Reset") { startGame() }
-                .foregroundColor(.orange)
+            glassButton("Reset") { startGame() }
         }
     }
 
@@ -157,24 +179,21 @@ struct ParkingView: View {
     var gridView: some View {
         let total = CGFloat(gridSize) * cellSize
         return ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(white: 0.2))
-                .frame(width: total + 24, height: total + 24)
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.white.opacity(0.08))
+                .frame(width: total + 16, height: total + 16)
 
-            // Exit marker
             Rectangle()
-                .fill(Color.green.opacity(0.6))
-                .frame(width: 8, height: cellSize)
-                .offset(x: total / 2 + 12, y: -cellSize * 0.5)
+                .fill(Color.green.opacity(0.7))
+                .frame(width: 6, height: cellSize)
+                .offset(x: total / 2 + 10, y: -cellSize * 0.5)
 
-            ForEach(cars) { car in
-                carView(car: car)
-            }
+            ForEach(cars) { car in carView(car: car) }
         }
-        .frame(width: total + 24, height: total + 24)
+        .frame(width: total + 16, height: total + 16)
     }
 
-    func carView(car: PkCar) -> some View {
+    func carView(car: ParkingCar) -> some View {
         let w = car.isHorizontal ? CGFloat(car.length) * cellSize - 4 : cellSize - 4
         let h = car.isHorizontal ? cellSize - 4 : CGFloat(car.length) * cellSize - 4
         let baseX = CGFloat(car.col) * cellSize - CGFloat(gridSize) * cellSize / 2 + cellSize / 2
@@ -183,22 +202,20 @@ struct ParkingView: View {
         let extraRows = car.isHorizontal ? 0 : CGFloat(car.length - 1) / 2 * cellSize
         let dx = dragCarID == car.id && car.isHorizontal ? dragOffset : 0
         let dy = dragCarID == car.id && !car.isHorizontal ? dragOffset : 0
+        let carColor: Color = car.isTarget ? .red : Color(hue: Double(car.id) * 0.13 + 0.5, saturation: 0.8, brightness: 0.9)
 
         return RoundedRectangle(cornerRadius: 8)
-            .fill(car.isTarget ? Color.red : Color(hue: Double(car.id) * 0.15 + 0.55, saturation: 0.7, brightness: 0.85))
+            .fill(carColor.opacity(0.85))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.35), lineWidth: 1))
             .frame(width: w, height: h)
             .offset(x: baseX + extraCols + dx, y: baseY + extraRows + dy)
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { val in
                     if dragCarID == nil { dragCarID = car.id }
                     guard dragCarID == car.id else { return }
-                    if car.isHorizontal {
-                        dragOffset = constrainDrag(car: car, raw: val.translation.width)
-                    } else {
-                        dragOffset = constrainDrag(car: car, raw: val.translation.height)
-                    }
+                    dragOffset = constrainDrag(car: car, raw: car.isHorizontal ? val.translation.width : val.translation.height)
                 }
-                .onEnded { val in
+                .onEnded { _ in
                     guard dragCarID == car.id else { return }
                     commitDrag(carID: car.id, offset: dragOffset)
                     dragCarID = nil
@@ -209,16 +226,26 @@ struct ParkingView: View {
 
     // MARK: Helpers
 
-    func constrainDrag(car: PkCar, raw: CGFloat) -> CGFloat {
+    @ViewBuilder
+    func glassButton(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .padding(.horizontal, 28)
+                .frame(height: 46)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.3), lineWidth: 1))
+        }
+    }
+
+    func constrainDrag(car: ParkingCar, raw: CGFloat) -> CGFloat {
         let steps = raw / cellSize
         if car.isHorizontal {
-            let minStep = -CGFloat(car.col)
-            let maxStep = CGFloat(gridSize - car.col - car.length)
-            return max(minStep, min(maxStep, steps)) * cellSize
+            return max(-CGFloat(car.col), min(CGFloat(gridSize - car.col - car.length), steps)) * cellSize
         } else {
-            let minStep = -CGFloat(car.row)
-            let maxStep = CGFloat(gridSize - car.row - car.length)
-            return max(minStep, min(maxStep, steps)) * cellSize
+            return max(-CGFloat(car.row), min(CGFloat(gridSize - car.row - car.length), steps)) * cellSize
         }
     }
 
@@ -226,22 +253,28 @@ struct ParkingView: View {
         guard let idx = cars.firstIndex(where: { $0.id == carID }) else { return }
         let steps = Int((offset / cellSize).rounded())
         guard steps != 0 else { return }
-        var newCar = cars[idx]
-        if newCar.isHorizontal { newCar.col += steps } else { newCar.row += steps }
-        if canPlace(car: newCar, excluding: carID) {
-            cars[idx] = newCar
-            moves += 1
-            checkWin()
+
+        // Walk one cell at a time so a car can never hop over another.
+        let dir = steps > 0 ? 1 : -1
+        var moved = cars[idx]
+        for _ in 0..<abs(steps) {
+            var next = moved
+            if next.isHorizontal { next.col += dir } else { next.row += dir }
+            guard canPlace(car: next, excluding: carID) else { break }
+            moved = next
         }
+
+        guard moved.col != cars[idx].col || moved.row != cars[idx].row else { return }
+        cars[idx] = moved
+        moves += 1
+        checkWin()
     }
 
-    func canPlace(car: PkCar, excluding id: Int) -> Bool {
+    func canPlace(car: ParkingCar, excluding id: Int) -> Bool {
         var occ = Set<String>()
         for c in cars where c.id != id {
             for i in 0..<c.length {
-                let col = c.isHorizontal ? c.col + i : c.col
-                let row = c.isHorizontal ? c.row : c.row + i
-                occ.insert("\(col),\(row)")
+                occ.insert("\(c.isHorizontal ? c.col + i : c.col),\(c.isHorizontal ? c.row : c.row + i)")
             }
         }
         for i in 0..<car.length {
@@ -254,30 +287,24 @@ struct ParkingView: View {
     }
 
     func checkWin() {
-        if let target = cars.first(where: { $0.isTarget }) {
-            if target.col + target.length >= gridSize && target.row == 2 {
-                phase = .won
-            }
+        if let target = cars.first(where: { $0.isTarget }), target.col + target.length >= gridSize, target.row == 2 {
+            phase = .won
+        }
+    }
+
+    func recordResult(won: Bool) {
+        recentResults.append(won)
+        if recentResults.count > 5 { recentResults.removeFirst() }
+        let successes = recentResults.filter { $0 }.count
+        if recentResults.count == 5 && successes > 4 {
+            difficultyMultiplier = min(difficultyMultiplier * 1.2, 2.0)
         }
     }
 
     func startGame() {
-        cars = pkPuzzles[puzzleIndex].cars
+        cars = parkingPuzzles[puzzleIndex].cars
         moves = 0
         phase = .playing
-    }
-}
-
-struct PkButtonStyle: ButtonStyle {
-    let color: Color
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 16, weight: .bold))
-            .foregroundColor(.black)
-            .padding(.horizontal, 20)
-            .frame(height: 44)
-            .background(color.opacity(configuration.isPressed ? 0.7 : 1))
-            .cornerRadius(10)
     }
 }
 

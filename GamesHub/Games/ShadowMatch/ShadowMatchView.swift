@@ -1,8 +1,8 @@
 import SwiftUI
 
-// MARK: - Models
+// MARK: - Models ()
 
-enum ShMtShape: CaseIterable {
+enum ShadowMatchShape: CaseIterable {
     case triangle, circle, square, pentagon, star, hexagon, cross
 
     var name: String {
@@ -18,44 +18,32 @@ enum ShMtShape: CaseIterable {
     }
 }
 
-struct ShMtShapeView: View {
-    let shape: ShMtShape
+struct ShadowMatchShapeView: View {
+    let shape: ShadowMatchShape
     let size: CGFloat
     let color: Color
 
     var body: some View {
-        ZStack {
-            switch shape {
-            case .circle:
-                Circle().fill(color).frame(width: size, height: size)
-            case .square:
-                Rectangle().fill(color).frame(width: size, height: size)
-            case .triangle:
-                ShMtTrianglePath()
-                    .fill(color)
-                    .frame(width: size, height: size)
-            case .pentagon:
-                ShMtPolygonPath(sides: 5)
-                    .fill(color)
-                    .frame(width: size, height: size)
-            case .star:
-                ShMtStarPath()
-                    .fill(color)
-                    .frame(width: size, height: size)
-            case .hexagon:
-                ShMtPolygonPath(sides: 6)
-                    .fill(color)
-                    .frame(width: size, height: size)
-            case .cross:
-                ShMtCrossPath()
-                    .fill(color)
-                    .frame(width: size, height: size)
-            }
+        switch shape {
+        case .circle:
+            Circle().fill(color).frame(width: size, height: size)
+        case .square:
+            Rectangle().fill(color).frame(width: size, height: size)
+        case .triangle:
+            ShadowMatchTrianglePath().fill(color).frame(width: size, height: size)
+        case .pentagon:
+            ShadowMatchPolygonPath(sides: 5).fill(color).frame(width: size, height: size)
+        case .star:
+            ShadowMatchStarPath().fill(color).frame(width: size, height: size)
+        case .hexagon:
+            ShadowMatchPolygonPath(sides: 6).fill(color).frame(width: size, height: size)
+        case .cross:
+            ShadowMatchCrossPath().fill(color).frame(width: size, height: size)
         }
     }
 }
 
-struct ShMtTrianglePath: Shape {
+struct ShadowMatchTrianglePath: Shape {
     func path(in rect: CGRect) -> Path {
         var p = Path()
         p.move(to: CGPoint(x: rect.midX, y: rect.minY))
@@ -66,7 +54,7 @@ struct ShMtTrianglePath: Shape {
     }
 }
 
-struct ShMtPolygonPath: Shape {
+struct ShadowMatchPolygonPath: Shape {
     let sides: Int
     func path(in rect: CGRect) -> Path {
         var p = Path()
@@ -74,8 +62,7 @@ struct ShMtPolygonPath: Shape {
         let c = CGPoint(x: rect.midX, y: rect.midY)
         for i in 0..<sides {
             let angle = (Double(i) / Double(sides)) * 2 * .pi - .pi / 2
-            let pt = CGPoint(x: c.x + CGFloat(cos(angle)) * r,
-                             y: c.y + CGFloat(sin(angle)) * r)
+            let pt = CGPoint(x: c.x + CGFloat(cos(angle)) * r, y: c.y + CGFloat(sin(angle)) * r)
             if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
         }
         p.closeSubpath()
@@ -83,7 +70,7 @@ struct ShMtPolygonPath: Shape {
     }
 }
 
-struct ShMtStarPath: Shape {
+struct ShadowMatchStarPath: Shape {
     func path(in rect: CGRect) -> Path {
         var p = Path()
         let outerR = min(rect.width, rect.height) / 2
@@ -92,8 +79,7 @@ struct ShMtStarPath: Shape {
         for i in 0..<10 {
             let angle = (Double(i) / 10.0) * 2 * .pi - .pi / 2
             let r = i.isMultiple(of: 2) ? outerR : innerR
-            let pt = CGPoint(x: c.x + CGFloat(cos(angle)) * r,
-                             y: c.y + CGFloat(sin(angle)) * r)
+            let pt = CGPoint(x: c.x + CGFloat(cos(angle)) * r, y: c.y + CGFloat(sin(angle)) * r)
             if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
         }
         p.closeSubpath()
@@ -101,7 +87,7 @@ struct ShMtStarPath: Shape {
     }
 }
 
-struct ShMtCrossPath: Shape {
+struct ShadowMatchCrossPath: Shape {
     func path(in rect: CGRect) -> Path {
         let t = rect.width * 0.3
         var p = Path()
@@ -111,34 +97,42 @@ struct ShMtCrossPath: Shape {
     }
 }
 
-// MARK: - Game State
+// MARK: - Game State 
 
-enum ShMtGamePhase { case start, playing, result }
+enum ShadowMatchPhase { case start, playing, result }
 
-struct ShMtRound {
-    let target: ShMtShape
-    let options: [ShMtShape]
+struct ShadowMatchRound {
+    let target: ShadowMatchShape
+    let options: [ShadowMatchShape]
     let correctIndex: Int
 }
 
-// MARK: - Main View
+// MARK: - Main View 
 
 struct ShadowMatchView: View {
-    @State private var phase: ShMtGamePhase = .start
+    @State private var phase: ShadowMatchPhase = .start
     @State private var round = 0
     @State private var score = 0
-    @State private var rounds: [ShMtRound] = []
+    @State private var rounds: [ShadowMatchRound] = []
     @State private var selectedIndex: Int? = nil
     @State private var timeLeft: Double = 5.0
+    @State private var baseRoundTime: Double = 5.0
     @State private var timer: Timer? = nil
-    @State private var feedback: Bool? = nil
+    @State private var recentResults: [Bool] = []
+    @State private var difficultyLevel: Int = 1
 
     let totalRounds = 10
-    let roundTime: Double = 5.0
+
+    var roundTime: Double { baseRoundTime }
 
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
+            LinearGradient(
+                colors: [Color(red: 0.3, green: 0.1, blue: 0.6), Color(red: 0.05, green: 0.3, blue: 0.7)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ).ignoresSafeArea()
+
             switch phase {
             case .start: startScreen
             case .playing: gameScreen
@@ -147,16 +141,30 @@ struct ShadowMatchView: View {
         }
     }
 
+    var glassPanel: some ShapeStyle { .ultraThinMaterial }
+
     var startScreen: some View {
-        VStack(spacing: 24) {
-            Text("Shadow Match")
-                .font(.largeTitle).bold()
-            Text("Tap the matching shadow\nfor the shape on the left.")
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
+        VStack(spacing: 28) {
+            VStack(spacing: 8) {
+                Text("Shadow Match")
+                    .font(.largeTitle).bold()
+                    .foregroundColor(.white)
+                Text("Match the shadow shape.\nSpeed earns bonus points!")
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            .padding(24)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
+
             Button("Start Game") { startGame() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .font(.headline)
+                .foregroundColor(.white)
+                .padding(.horizontal, 40).padding(.vertical, 14)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.4), lineWidth: 1))
         }
         .padding()
     }
@@ -164,50 +172,68 @@ struct ShadowMatchView: View {
     var gameScreen: some View {
         VStack(spacing: 16) {
             HStack {
-                Text("Round \(round)/\(totalRounds)")
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Round \(round)/\(totalRounds)").font(.headline).foregroundColor(.white)
+                    Text("Level \(difficultyLevel)").font(.caption).foregroundColor(.white.opacity(0.7))
+                }
                 Spacer()
-                Text("Score: \(score)")
-                    .font(.headline)
+                Text("Score: \(score)").font(.headline).foregroundColor(.white)
             }
             .padding(.horizontal)
 
-            ProgressView(value: timeLeft, total: roundTime)
-                .tint(timeLeft < 2 ? .red : .blue)
+            ProgressView(value: max(0, timeLeft), total: roundTime)
+                .tint(timeLeft < 2 ? .red : .cyan)
                 .padding(.horizontal)
+                .background(.ultraThinMaterial.opacity(0.3))
 
             if round > 0 && round <= rounds.count {
                 let r = rounds[round - 1]
-                HStack(spacing: 20) {
-                    VStack {
-                        Text("Shape").font(.caption).foregroundColor(.secondary)
-                        ShMtShapeView(shape: r.target, size: 80, color: .blue)
-                            .padding(16)
-                            .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
-                    }
-                    VStack(spacing: 12) {
-                        Text("Match it!").font(.caption).foregroundColor(.secondary)
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                            ForEach(0..<4, id: \.self) { i in
-                                let isCorrect = i == r.correctIndex
-                                let wasSelected = selectedIndex == i
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .fill(wasSelected ? (isCorrect ? Color.green.opacity(0.3) : Color.red.opacity(0.3)) : Color(.secondarySystemBackground))
-                                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(wasSelected ? (isCorrect ? Color.green : Color.red) : Color.clear, lineWidth: 2))
-                                    ShMtShapeView(shape: r.options[i], size: 44, color: .black)
-                                        .padding(8)
-                                }
-                                .frame(height: 70)
-                                .onTapGesture {
-                                    guard selectedIndex == nil else { return }
-                                    handleTap(index: i, correct: isCorrect)
+                VStack(spacing: 16) {
+                    HStack(alignment: .center, spacing: 20) {
+                        VStack(spacing: 8) {
+                            Text("Shape").font(.caption).foregroundColor(.white.opacity(0.7))
+                            ShadowMatchShapeView(shape: r.target, size: 70, color: .white)
+                                .padding(16)
+                                .background(.ultraThinMaterial)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
+                        }
+                        Image(systemName: "arrow.right")
+                            .foregroundColor(.white.opacity(0.6))
+                        VStack(spacing: 8) {
+                            Text("Match it!").font(.caption).foregroundColor(.white.opacity(0.7))
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                                ForEach(0..<4, id: \.self) { i in
+                                    let isCorrect = i == r.correctIndex
+                                    let wasSelected = selectedIndex == i
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(wasSelected
+                                                  ? (isCorrect ? Color.green.opacity(0.4) : Color.red.opacity(0.4))
+                                                  : Color.clear)
+                                            .background(.ultraThinMaterial)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .stroke(wasSelected
+                                                            ? (isCorrect ? Color.green : Color.red)
+                                                            : Color.white.opacity(0.3),
+                                                            lineWidth: wasSelected ? 2 : 1)
+                                            )
+                                        ShadowMatchShapeView(shape: r.options[i], size: 40, color: .white)
+                                            .padding(8)
+                                    }
+                                    .frame(height: 65)
+                                    .onTapGesture {
+                                        guard selectedIndex == nil else { return }
+                                        handleTap(index: i, correct: isCorrect)
+                                    }
                                 }
                             }
                         }
                     }
+                    .padding(.horizontal)
                 }
-                .padding(.horizontal)
             }
             Spacer()
         }
@@ -216,37 +242,51 @@ struct ShadowMatchView: View {
 
     var resultScreen: some View {
         VStack(spacing: 24) {
-            Text("Game Over!").font(.largeTitle).bold()
-            Text("Score: \(score) / \(totalRounds * 100)")
-                .font(.title2)
-            Text(score >= 700 ? "Excellent!" : score >= 400 ? "Good job!" : "Keep practicing!")
-                .foregroundColor(.secondary)
+            VStack(spacing: 12) {
+                Text("Game Over!").font(.largeTitle).bold().foregroundColor(.white)
+                Text("Score: \(score) / \(totalRounds * 100)").font(.title2).foregroundColor(.white.opacity(0.9))
+                Text(score >= 700 ? "Excellent!" : score >= 400 ? "Good job!" : "Keep practicing!")
+                    .foregroundColor(.white.opacity(0.7))
+                if difficultyLevel > 1 {
+                    Text("You reached difficulty level \(difficultyLevel)!")
+                        .font(.caption).foregroundColor(.cyan)
+                }
+            }
+            .padding(28)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.3), lineWidth: 1))
+
             Button("Play Again") { startGame() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .font(.headline)
+                .foregroundColor(.white)
+                .padding(.horizontal, 40).padding(.vertical, 14)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.4), lineWidth: 1))
         }
         .padding()
     }
 
-    func buildRounds() -> [ShMtRound] {
-        var result: [ShMtRound] = []
-        let shapes = ShMtShape.allCases
-        for _ in 0..<totalRounds {
+    func buildRounds() -> [ShadowMatchRound] {
+        let shapes = ShadowMatchShape.allCases
+        return (0..<totalRounds).map { _ in
             let target = shapes.randomElement()!
-            var pool = shapes.filter { $0 != target }.shuffled()
-            let wrong = Array(pool.prefix(3))
+            let wrong = Array(shapes.filter { $0 != target }.shuffled().prefix(3))
             let correctIndex = Int.random(in: 0..<4)
             var options = wrong
             options.insert(target, at: correctIndex)
-            result.append(ShMtRound(target: target, options: options, correctIndex: correctIndex))
+            return ShadowMatchRound(target: target, options: options, correctIndex: correctIndex)
         }
-        return result
     }
 
     func startGame() {
         rounds = buildRounds()
         round = 0
         score = 0
+        recentResults = []
+        difficultyLevel = 1
+        baseRoundTime = 5.0
         phase = .playing
         nextRound()
     }
@@ -259,8 +299,7 @@ struct ShadowMatchView: View {
         }
         round += 1
         selectedIndex = nil
-        feedback = nil
-        timeLeft = roundTime
+        timeLeft = baseRoundTime
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { t in
             timeLeft -= 0.05
@@ -275,8 +314,14 @@ struct ShadowMatchView: View {
         timer?.invalidate()
         selectedIndex = index
         if correct {
-            let bonus = Int(timeLeft / roundTime * 50)
+            let bonus = Int(max(0, timeLeft) / baseRoundTime * 50)
             score += 50 + bonus
+        }
+        recentResults.append(correct)
+        if recentResults.count > 5 { recentResults.removeFirst() }
+        if recentResults.count == 5 && recentResults.filter({ $0 }).count > 4 {
+            baseRoundTime = max(2.0, baseRoundTime * 0.8)
+            difficultyLevel += 1
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             nextRound()

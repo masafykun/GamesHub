@@ -14,356 +14,550 @@ struct MinesweeperCell {
     var adjacentMines: Int = 0
 }
 
-enum MinesweeperGameState {
+enum MinesweeperGamePhase {
     case idle
     case playing
     case won
     case lost
 }
 
-// MARK: - ViewModel
+enum MinesweeperDifficulty: String {
+    case easy = "Easy"
+    case medium = "Medium"
+    case hard = "Hard"
 
-class MinesweeperGame: ObservableObject {
-    static let rows = 8
-    static let cols = 8
-    static let totalMines = 10
-
-    @Published var cells: [[MinesweeperCell]]
-    @Published var gameState: MinesweeperGameState = .idle
-    @Published var flagCount: Int = 0
-    @Published var elapsedTime: Int = 0
-
-    private var timer: Foundation.Timer?
-    private var minesPlaced: Bool = false
-
-    init() {
-        cells = Array(
-            repeating: Array(repeating: MinesweeperCell(), count: MinesweeperGame.cols),
-            count: MinesweeperGame.rows
-        )
+    var color: Color {
+        switch self {
+        case .easy:   return .green
+        case .medium: return .orange
+        case .hard:   return .red
+        }
     }
 
-    func reset() {
-        cells = Array(
-            repeating: Array(repeating: MinesweeperCell(), count: MinesweeperGame.cols),
-            count: MinesweeperGame.rows
-        )
-        gameState = .idle
+    var mineCount: Int {
+        switch self {
+        case .easy:   return 8
+        case .medium: return 12
+        case .hard:   return 16
+        }
+    }
+}
+
+struct MinesweeperBoard {
+    static let gridSize = 8
+
+    var cells: [[MinesweeperCell]] = Array(
+        repeating: Array(repeating: MinesweeperCell(), count: MinesweeperBoard.gridSize),
+        count: MinesweeperBoard.gridSize
+    )
+    var mineCount: Int = 10
+    var flagCount: Int = 0
+    var revealedCount: Int = 0
+    var phase: MinesweeperGamePhase = .idle
+
+    var remainingMines: Int { mineCount - flagCount }
+    var safeCells: Int { MinesweeperBoard.gridSize * MinesweeperBoard.gridSize - mineCount }
+
+    mutating func reset(mineCount: Int) {
+        self.mineCount = mineCount
         flagCount = 0
-        elapsedTime = 0
-        minesPlaced = false
-        stopTimer()
+        revealedCount = 0
+        phase = .idle
+        cells = Array(
+            repeating: Array(repeating: MinesweeperCell(), count: MinesweeperBoard.gridSize),
+            count: MinesweeperBoard.gridSize
+        )
     }
 
-    private func startTimer() {
-        stopTimer()
-        timer = Foundation.Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.elapsedTime += 1
+    /// The first tap is always safe — mines skip the tapped cell and its neighbours.
+    mutating func placeMines(avoiding row: Int, col: Int) {
+        let size = MinesweeperBoard.gridSize
+        var positions: [(Int, Int)] = []
+        for r in 0..<size {
+            for c in 0..<size where abs(r - row) > 1 || abs(c - col) > 1 {
+                positions.append((r, c))
+            }
         }
-    }
-
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
-    }
-
-    private func placeMines(avoiding firstRow: Int, firstCol: Int) {
-        var placed = 0
-        while placed < MinesweeperGame.totalMines {
-            let r = Int.random(in: 0..<MinesweeperGame.rows)
-            let c = Int.random(in: 0..<MinesweeperGame.cols)
-            if cells[r][c].isMine { continue }
-            // Avoid first tap cell and its neighbors
-            let dr = abs(r - firstRow)
-            let dc = abs(c - firstCol)
-            if dr <= 1 && dc <= 1 { continue }
-            cells[r][c].isMine = true
-            placed += 1
+        positions.shuffle()
+        for i in 0..<min(mineCount, positions.count) {
+            cells[positions[i].0][positions[i].1].isMine = true
         }
-        // Calculate adjacency counts
-        for r in 0..<MinesweeperGame.rows {
-            for c in 0..<MinesweeperGame.cols {
-                if cells[r][c].isMine { continue }
+        for r in 0..<size {
+            for c in 0..<size where !cells[r][c].isMine {
                 cells[r][c].adjacentMines = countAdjacentMines(row: r, col: c)
             }
         }
-        minesPlaced = true
     }
 
-    private func countAdjacentMines(row: Int, col: Int) -> Int {
+    func countAdjacentMines(row: Int, col: Int) -> Int {
+        let size = MinesweeperBoard.gridSize
         var count = 0
         for dr in -1...1 {
-            for dc in -1...1 {
-                if dr == 0 && dc == 0 { continue }
-                let nr = row + dr
-                let nc = col + dc
-                if nr >= 0 && nr < MinesweeperGame.rows && nc >= 0 && nc < MinesweeperGame.cols {
-                    if cells[nr][nc].isMine { count += 1 }
+            for dc in -1...1 where !(dr == 0 && dc == 0) {
+                let nr = row + dr, nc = col + dc
+                if nr >= 0, nr < size, nc >= 0, nc < size, cells[nr][nc].isMine {
+                    count += 1
                 }
             }
         }
         return count
     }
 
-    func reveal(row: Int, col: Int) {
-        guard gameState == .idle || gameState == .playing else { return }
+    mutating func reveal(row: Int, col: Int) {
+        guard phase == .playing || phase == .idle else { return }
         guard cells[row][col].state == .hidden else { return }
 
-        if gameState == .idle {
-            gameState = .playing
-            placeMines(avoiding: row, firstCol: col)
-            startTimer()
+        if phase == .idle {
+            phase = .playing
+            placeMines(avoiding: row, col: col)
         }
 
         if cells[row][col].isMine {
             cells[row][col].state = .revealed
-            gameState = .lost
-            stopTimer()
+            phase = .lost
             revealAllMines()
             return
         }
 
         floodReveal(row: row, col: col)
-        checkWin()
+
+        if revealedCount >= safeCells {
+            phase = .won
+        }
     }
 
-    private func floodReveal(row: Int, col: Int) {
-        guard row >= 0 && row < MinesweeperGame.rows else { return }
-        guard col >= 0 && col < MinesweeperGame.cols else { return }
-        guard cells[row][col].state == .hidden else { return }
-        guard !cells[row][col].isMine else { return }
+    mutating func floodReveal(row: Int, col: Int) {
+        let size = MinesweeperBoard.gridSize
+        guard row >= 0, row < size, col >= 0, col < size else { return }
+        guard cells[row][col].state == .hidden, !cells[row][col].isMine else { return }
 
         cells[row][col].state = .revealed
+        revealedCount += 1
 
         if cells[row][col].adjacentMines == 0 {
             for dr in -1...1 {
-                for dc in -1...1 {
-                    if dr == 0 && dc == 0 { continue }
+                for dc in -1...1 where !(dr == 0 && dc == 0) {
                     floodReveal(row: row + dr, col: col + dc)
                 }
             }
         }
     }
 
-    private func revealAllMines() {
-        for r in 0..<MinesweeperGame.rows {
-            for c in 0..<MinesweeperGame.cols {
-                if cells[r][c].isMine {
-                    cells[r][c].state = .revealed
-                }
-            }
-        }
-    }
+    mutating func toggleFlag(row: Int, col: Int) {
+        guard phase == .playing || phase == .idle else { return }
+        guard cells[row][col].state != .revealed else { return }
 
-    func toggleFlag(row: Int, col: Int) {
-        guard gameState == .playing || gameState == .idle else { return }
-        let cell = cells[row][col]
-        if cell.state == .hidden {
-            cells[row][col].state = .flagged
-            flagCount += 1
-        } else if cell.state == .flagged {
+        if cells[row][col].state == .flagged {
             cells[row][col].state = .hidden
             flagCount -= 1
+        } else {
+            cells[row][col].state = .flagged
+            flagCount += 1
         }
     }
 
-    private func checkWin() {
-        for r in 0..<MinesweeperGame.rows {
-            for c in 0..<MinesweeperGame.cols {
-                let cell = cells[r][c]
-                if !cell.isMine && cell.state != .revealed {
-                    return
-                }
+    mutating func revealAllMines() {
+        let size = MinesweeperBoard.gridSize
+        for r in 0..<size {
+            for c in 0..<size where cells[r][c].isMine && cells[r][c].state != .flagged {
+                cells[r][c].state = .revealed
             }
         }
-        gameState = .won
-        stopTimer()
-    }
-
-    var minesRemaining: Int {
-        MinesweeperGame.totalMines - flagCount
     }
 }
 
-// MARK: - Cell View
-
-struct MinesweeperCellView: View {
-    let cell: MinesweeperCell
-    let isGameOver: Bool
-
-    private func numberColor(_ n: Int) -> Color {
-        switch n {
-        case 1: return Color(red: 0.0, green: 0.0, blue: 0.9)
-        case 2: return Color(red: 0.0, green: 0.55, blue: 0.0)
-        case 3: return Color(red: 0.9, green: 0.0, blue: 0.0)
-        case 4: return Color(red: 0.0, green: 0.0, blue: 0.55)
-        case 5: return Color(red: 0.55, green: 0.0, blue: 0.0)
-        case 6: return Color(red: 0.0, green: 0.55, blue: 0.55)
-        case 7: return Color(red: 0.3, green: 0.0, blue: 0.3)
-        default: return .gray
-        }
-    }
-
-    var body: some View {
-        ZStack {
-            if cell.state == .revealed {
-                if cell.isMine {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.red.opacity(0.8))
-                    Text("💣")
-                        .font(.system(size: 16))
-                } else {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color(UIColor.systemGray5))
-                    if cell.adjacentMines > 0 {
-                        Text("\(cell.adjacentMines)")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(numberColor(cell.adjacentMines))
-                    }
-                }
-            } else if cell.state == .flagged {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(UIColor.systemGray3))
-                    .shadow(color: .white.opacity(0.6), radius: 2, x: -1, y: -1)
-                    .shadow(color: .black.opacity(0.3), radius: 2, x: 1, y: 1)
-                Text("🚩")
-                    .font(.system(size: 16))
-            } else {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(UIColor.systemGray3))
-                    .shadow(color: .white.opacity(0.6), radius: 2, x: -1, y: -1)
-                    .shadow(color: .black.opacity(0.3), radius: 2, x: 1, y: 1)
-                if isGameOver && cell.isMine {
-                    Text("💣")
-                        .font(.system(size: 16))
-                        .opacity(0.4)
-                }
-            }
-        }
-        .frame(width: 38, height: 38)
+private func minesweeperNumberColor(_ n: Int) -> Color {
+    switch n {
+    case 1: return Color(red: 0.3, green: 0.6, blue: 1.0)
+    case 2: return Color(red: 0.2, green: 0.85, blue: 0.4)
+    case 3: return Color(red: 1.0, green: 0.4, blue: 0.4)
+    case 4: return Color(red: 0.7, green: 0.4, blue: 1.0)
+    case 5: return Color(red: 1.0, green: 0.55, blue: 0.2)
+    case 6: return Color(red: 0.2, green: 0.85, blue: 0.9)
+    case 7: return Color(red: 0.95, green: 0.95, blue: 0.5)
+    case 8: return Color(red: 0.8, green: 0.8, blue: 0.85)
+    default: return .clear
     }
 }
 
 // MARK: - Main View
 
 struct MinesweeperView: View {
-    @StateObject private var game = MinesweeperGame()
-    @State private var longPressLocation: (Int, Int)? = nil
+    @State private var board = MinesweeperBoard()
+    @State private var roundScores: [Int] = []
+    @State private var difficulty: MinesweeperDifficulty = .easy
+    @State private var elapsedSeconds: Int = 0
+    @State private var gameTimer: Timer? = nil
+    @State private var isStarted: Bool = false
 
-    private func formattedTime(_ seconds: Int) -> String {
-        let m = seconds / 60
-        let s = seconds % 60
-        return String(format: "%02d:%02d", m, s)
+    @AppStorage("minesweeperBestTime") private var bestTime: Int = 0
+
+    private let gridSize = MinesweeperBoard.gridSize
+
+    /// Only a win scores; the faster the clear, the better.
+    private func computeScore() -> Int {
+        guard board.phase == .won else { return 0 }
+        let timeBonus = max(0, 300 - elapsedSeconds) * 10
+        let mineBonus = board.mineCount * 40
+        return timeBonus + mineBonus
     }
 
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
-            HStack {
-                // Mine counter
-                HStack(spacing: 4) {
-                    Text("💣")
-                        .font(.title2)
-                    Text("\(game.minesRemaining)")
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
-                        .foregroundColor(game.minesRemaining < 0 ? .red : .primary)
+        GeometryReader { geo in
+            let availableWidth = min(geo.size.width - 24, geo.size.height - 200)
+            let cellSize = availableWidth / CGFloat(gridSize)
+            let boardSize = cellSize * CGFloat(gridSize)
+
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.06, green: 0.06, blue: 0.14),
+                        Color(red: 0.10, green: 0.08, blue: 0.20)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+
+                VStack(spacing: 10) {
+                    headerView
+                    boardView(cellSize: cellSize, boardSize: boardSize)
+                    Spacer(minLength: 0)
                 }
-                .frame(minWidth: 70, alignment: .leading)
+                .padding(.top, 8)
+                .padding(.horizontal, 12)
 
-                Spacer()
-
-                // Reset button
-                Button(action: { game.reset() }) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(UIColor.systemGray4))
-                            .shadow(color: .white.opacity(0.6), radius: 2, x: -1, y: -1)
-                            .shadow(color: .black.opacity(0.25), radius: 2, x: 1, y: 1)
-                        Text(statusEmoji)
-                            .font(.title2)
-                    }
-                    .frame(width: 48, height: 40)
+                if !isStarted {
+                    startOverlay
+                } else if board.phase == .won || board.phase == .lost {
+                    gameOverOverlay
                 }
-
-                Spacer()
-
-                // Timer
-                HStack(spacing: 4) {
-                    Text(formattedTime(game.elapsedTime))
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
-                    Text("⏱")
-                        .font(.title2)
-                }
-                .frame(minWidth: 70, alignment: .trailing)
-            }
-            .padding(.horizontal, 16)
-
-            // Game status banner
-            if game.gameState == .won || game.gameState == .lost {
-                Text(game.gameState == .won ? "You Win!" : "Game Over!")
-                    .font(.title2.bold())
-                    .foregroundColor(game.gameState == .won ? .green : .red)
-                    .transition(.scale)
-            }
-
-            // Grid
-            VStack(spacing: 3) {
-                ForEach(0..<MinesweeperGame.rows, id: \.self) { row in
-                    HStack(spacing: 3) {
-                        ForEach(0..<MinesweeperGame.cols, id: \.self) { col in
-                            MinesweeperCellView(
-                                cell: game.cells[row][col],
-                                isGameOver: game.gameState == .lost
-                            )
-                            .contentShape(Rectangle())
-                            .gesture(
-                                LongPressGesture(minimumDuration: 0.4)
-                                    .onEnded { _ in
-                                        let impact = UIImpactFeedbackGenerator(style: .medium)
-                                        impact.impactOccurred()
-                                        game.toggleFlag(row: row, col: col)
-                                    }
-                            )
-                            .simultaneousGesture(
-                                TapGesture()
-                                    .onEnded {
-                                        guard game.cells[row][col].state == .hidden else { return }
-                                        game.reveal(row: row, col: col)
-                                    }
-                            )
-                        }
-                    }
-                }
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(UIColor.systemGray6))
-                    .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 3)
-            )
-            .padding(.horizontal, 8)
-
-            // Instructions
-            VStack(spacing: 4) {
-                Text("Tap to reveal  •  Long press to flag")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
             }
         }
-        .padding(.vertical, 16)
+        .onDisappear { stopGameTimer() }
+        .preferredColorScheme(.dark)
     }
 
-    private var statusEmoji: String {
-        switch game.gameState {
-        case .idle: return "🙂"
-        case .playing: return "😊"
-        case .won: return "😎"
-        case .lost: return "😵"
+    // MARK: - Header
+
+    private var headerView: some View {
+        HStack(spacing: 10) {
+            glassStatBadge(icon: "💣", value: "\(board.remainingMines)", label: "MINES")
+
+            Spacer()
+
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(difficulty.color)
+                    .frame(width: 8, height: 8)
+                VStack(spacing: 1) {
+                    Text("LEVEL")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                    Text(difficulty.rawValue)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(difficulty.color)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+
+            Spacer()
+
+            glassStatBadge(
+                icon: "⏱",
+                value: String(format: "%02d:%02d", elapsedSeconds / 60, elapsedSeconds % 60),
+                label: "TIME"
+            )
+        }
+    }
+
+    private func glassStatBadge(icon: String, value: String, label: String) -> some View {
+        VStack(spacing: 1) {
+            HStack(spacing: 4) {
+                Text(icon).font(.system(size: 13))
+                Text(value)
+                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+            }
+            Text(label)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.45))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    // MARK: - Board
+
+    private func boardView(cellSize: CGFloat, boardSize: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(red: 0.08, green: 0.08, blue: 0.18))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                )
+
+            ForEach(0..<gridSize, id: \.self) { row in
+                ForEach(0..<gridSize, id: \.self) { col in
+                    cellView(row: row, col: col, cellSize: cellSize)
+                        .frame(width: cellSize, height: cellSize)
+                        .offset(x: CGFloat(col) * cellSize, y: CGFloat(row) * cellSize)
+                }
+            }
+        }
+        .frame(width: boardSize, height: boardSize)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.5), radius: 12)
+    }
+
+    @ViewBuilder
+    private func cellView(row: Int, col: Int, cellSize: CGFloat) -> some View {
+        let cell = board.cells[row][col]
+        let padding: CGFloat = 2
+
+        ZStack {
+            switch cell.state {
+            case .hidden:
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.22, green: 0.22, blue: 0.38),
+                                Color(red: 0.15, green: 0.15, blue: 0.28)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5)
+                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8)
+                    )
+                    .padding(padding)
+
+            case .flagged:
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.28, green: 0.20, blue: 0.38),
+                                Color(red: 0.20, green: 0.14, blue: 0.28)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5)
+                            .strokeBorder(Color.purple.opacity(0.5), lineWidth: 0.8)
+                    )
+                    .padding(padding)
+                Text("🚩").font(.system(size: cellSize * 0.45))
+
+            case .revealed:
+                if cell.isMine {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color(red: 0.5, green: 0.08, blue: 0.08))
+                        .padding(padding)
+                    Text("💣").font(.system(size: cellSize * 0.45))
+                } else if cell.adjacentMines > 0 {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color(red: 0.12, green: 0.12, blue: 0.22))
+                        .padding(padding)
+                    Text("\(cell.adjacentMines)")
+                        .font(.system(size: cellSize * 0.48, weight: .bold, design: .monospaced))
+                        .foregroundColor(minesweeperNumberColor(cell.adjacentMines))
+                } else {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color(red: 0.10, green: 0.10, blue: 0.18))
+                        .padding(padding)
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        // Long press flags; a quick tap reveals. The two never fire together.
+        .onTapGesture { handleTap(row: row, col: col) }
+        .onLongPressGesture(minimumDuration: 0.35) { handleLongPress(row: row, col: col) }
+    }
+
+    // MARK: - Overlays
+
+    private var startOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+
+            VStack(spacing: 20) {
+                Text("MINESWEEPER")
+                    .font(.system(size: 28, weight: .heavy, design: .monospaced))
+                    .foregroundColor(.white)
+                    .shadow(color: Color(red: 0.3, green: 0.6, blue: 1.0).opacity(0.9), radius: 14)
+
+                VStack(spacing: 8) {
+                    Text("Tap to reveal · Long-press to flag")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white.opacity(0.65))
+                    difficultyBadgeView
+                    if bestTime > 0 {
+                        Text("Best clear: \(String(format: "%02d:%02d", bestTime / 60, bestTime % 60))")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                }
+
+                primaryButton(title: "Start Game", action: startGame)
+            }
+            .padding(30)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .padding(.horizontal, 28)
+        }
+    }
+
+    private var gameOverOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.60).ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                let won = board.phase == .won
+
+                Text(won ? "YOU WIN!" : "BOOM!")
+                    .font(.system(size: 30, weight: .heavy, design: .monospaced))
+                    .foregroundColor(.white)
+                    .shadow(color: (won ? Color.green : Color.red).opacity(0.85), radius: 12)
+
+                if won {
+                    Text("Cleared in \(String(format: "%02d:%02d", elapsedSeconds / 60, elapsedSeconds % 60))")
+                        .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.85))
+                    if bestTime > 0 {
+                        Text("Best: \(String(format: "%02d:%02d", bestTime / 60, bestTime % 60))")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                } else {
+                    Text("You hit a mine")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+
+                difficultyBadgeView
+
+                primaryButton(title: "Play Again", action: restartGame)
+            }
+            .padding(26)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .padding(.horizontal, 24)
+        }
+    }
+
+    private var difficultyBadgeView: some View {
+        HStack(spacing: 6) {
+            Circle().fill(difficulty.color).frame(width: 8, height: 8)
+            Text("\(difficulty.rawValue) · \(difficulty.mineCount) mines")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(difficulty.color)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(difficulty.color.opacity(0.15), in: Capsule())
+        .overlay(Capsule().strokeBorder(difficulty.color.opacity(0.4), lineWidth: 1))
+    }
+
+    private func primaryButton(title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundColor(.black)
+                .padding(.horizontal, 38)
+                .padding(.vertical, 14)
+                .background(
+                    LinearGradient(
+                        colors: [Color(red: 0.3, green: 0.7, blue: 1.0), Color(red: 0.1, green: 0.5, blue: 0.9)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(Capsule())
+                .shadow(color: Color.blue.opacity(0.5), radius: 12)
+        }
+    }
+
+    // MARK: - Flow
+
+    private func startGame() {
+        isStarted = true
+        restartGame()
+    }
+
+    private func restartGame() {
+        stopGameTimer()
+        elapsedSeconds = 0
+        board.reset(mineCount: difficulty.mineCount)
+    }
+
+    private func startGameTimer() {
+        stopGameTimer()
+        gameTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            elapsedSeconds += 1
+        }
+    }
+
+    private func stopGameTimer() {
+        gameTimer?.invalidate()
+        gameTimer = nil
+    }
+
+    private func handleTap(row: Int, col: Int) {
+        guard board.phase == .idle || board.phase == .playing else { return }
+        guard board.cells[row][col].state == .hidden else { return }
+
+        if board.phase == .idle { startGameTimer() }
+
+        board.reveal(row: row, col: col)
+
+        if board.phase == .won || board.phase == .lost {
+            stopGameTimer()
+            handleRoundEnd()
+        }
+    }
+
+    private func handleLongPress(row: Int, col: Int) {
+        guard board.phase == .idle || board.phase == .playing else { return }
+        if board.phase == .idle { startGameTimer() }
+        board.toggleFlag(row: row, col: col)
+    }
+
+    private func handleRoundEnd() {
+        if board.phase == .won, bestTime == 0 || elapsedSeconds < bestTime {
+            bestTime = elapsedSeconds
+        }
+        roundScores.append(computeScore())
+        if roundScores.count > 5 {
+            roundScores = Array(roundScores.suffix(5))
+        }
+        adjustDifficulty()
+    }
+
+    /// Clear boards quickly and the field gets denser; struggle and it eases off.
+    private func adjustDifficulty() {
+        guard roundScores.count >= 2 else {
+            difficulty = .easy
+            return
+        }
+        let recent = roundScores.suffix(3)
+        let avg = Double(recent.reduce(0, +)) / Double(recent.count)
+        if avg >= 2200 {
+            difficulty = .hard
+        } else if avg >= 1100 {
+            difficulty = .medium
+        } else {
+            difficulty = .easy
         }
     }
 }
-
-// MARK: - Preview
 
 #Preview {
     MinesweeperView()

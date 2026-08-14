@@ -1,314 +1,323 @@
 import SwiftUI
 
-// MARK: - Constants
-
-private enum BubbleShooterConstants {
-    static let cols: Int = 9
-    static let initialRows: Int = 6
-    static let bubbleRadius: CGFloat = 22
-    static let bubbleDiameter: CGFloat = 44
-    static let shooterRadius: CGFloat = 26
-    static let projectileSpeed: CGFloat = 600 // points per second
-    static let tickInterval: TimeInterval = 1.0 / 60.0
-    static let popScore: Int = 30
-    static let newRowEveryShots: Int = 10
-    static let colors: [Color] = [.red, .blue, .green, .yellow, .purple]
-    static let colorNames: [String] = ["red", "blue", "green", "yellow", "purple"]
-}
-
 // MARK: - Models
 
-struct BubbleShooterBubble: Identifiable, Equatable {
-    let id: UUID = UUID()
-    var col: Int
-    var row: Int
-    var colorIndex: Int
+enum BubbleShooterColor: Int, CaseIterable {
+    case red, blue, green, yellow, purple
 
-    static func == (lhs: BubbleShooterBubble, rhs: BubbleShooterBubble) -> Bool {
-        lhs.id == rhs.id
+    var color: Color {
+        switch self {
+        case .red:    return Color(red: 0.95, green: 0.3, blue: 0.3)
+        case .blue:   return Color(red: 0.3, green: 0.55, blue: 0.95)
+        case .green:  return Color(red: 0.3, green: 0.85, blue: 0.45)
+        case .yellow: return Color(red: 0.98, green: 0.85, blue: 0.2)
+        case .purple: return Color(red: 0.75, green: 0.35, blue: 0.95)
+        }
     }
+}
+
+enum BubbleShooterDifficulty: String {
+    case easy   = "Easy"
+    case medium = "Medium"
+    case hard   = "Hard"
+
+    var badgeColor: Color {
+        switch self {
+        case .easy:   return .green
+        case .medium: return .orange
+        case .hard:   return .red
+        }
+    }
+
+    /// Fewer colours on easy makes matches far more likely.
+    var colorCount: Int {
+        switch self {
+        case .easy: return 4
+        case .medium: return 5
+        case .hard: return 5
+        }
+    }
+}
+
+enum BubbleShooterGameState {
+    case idle, aiming, gameOver
+}
+
+struct BubbleShooterBubble: Identifiable {
+    let id: Int
+    var row: Int
+    var col: Int
+    var color: BubbleShooterColor
 }
 
 struct BubbleShooterProjectile {
     var x: CGFloat
     var y: CGFloat
-    var dx: CGFloat
-    var dy: CGFloat
-    var colorIndex: Int
+    var vx: CGFloat
+    var vy: CGFloat
+    var color: BubbleShooterColor
+    var active: Bool
 }
 
-enum BubbleShooterGameState {
-    case idle
-    case aiming
-    case shooting
-    case gameOver
+struct BubbleShooterPopEffect: Identifiable {
+    let id: Int
+    var position: CGPoint
+    var color: Color
+    var lifetime: Double = 0.4
+    var maxLifetime: Double = 0.4
+    var scale: CGFloat = 1.0
+    var opacity: Double = 1.0
 }
 
-// MARK: - LCG RNG (no Foundation)
+// MARK: - Engine
 
-private struct BubbleShooterRNG {
-    private var state: UInt64
-
-    init(seed: UInt64 = 12345) {
-        state = seed == 0 ? 1 : seed
-    }
-
-    mutating func next() -> UInt64 {
-        state = state &* 6364136223846793005 &+ 1442695040888963407
-        return state
-    }
-
-    mutating func nextInt(_ n: Int) -> Int {
-        guard n > 0 else { return 0 }
-        return Int(next() % UInt64(n))
-    }
-}
-
-// MARK: - ViewModel
-
-@MainActor
-final class BubbleShooterViewModel: ObservableObject {
+final class BubbleShooterEngine: ObservableObject {
+    var canvasSize: CGSize = .zero
+    var bubbleRadius: CGFloat = 22
+    var hexRowHeight: CGFloat { bubbleRadius * 1.73 }
+    let topOffset: CGFloat = 80
 
     @Published var bubbles: [BubbleShooterBubble] = []
-    @Published var projectile: BubbleShooterProjectile? = nil
-    @Published var nextColorIndex: Int = 0
-    @Published var aimAngle: Double = -.pi / 2   // radians, -pi/2 = straight up
-    @Published var isDragging: Bool = false
+    @Published var nextColor: BubbleShooterColor = .red
+    @Published var currentColor: BubbleShooterColor = .red
+    @Published var projectile = BubbleShooterProjectile(x: 0, y: 0, vx: 0, vy: 0, color: .red, active: false)
+    @Published var aimAngle: CGFloat = -.pi / 2
     @Published var score: Int = 0
     @Published var shots: Int = 0
-    @Published var gameState: BubbleShooterGameState = .aiming
-    @Published var popFeedback: [BubbleShooterBubble] = []  // bubbles being animated out
+    @Published var shotsUntilNewRow: Int = 8
+    @Published var gameState: BubbleShooterGameState = .idle
+    @Published var difficulty: BubbleShooterDifficulty = .medium
+    @Published var roundScores: [Int] = []
+    @Published var popEffects: [BubbleShooterPopEffect] = []
 
-    private var rng = BubbleShooterRNG(seed: UInt64(Date.timeIntervalSinceReferenceDate.bitPattern & 0xFFFFFFFF))
-    private var gameTimer: Timer?
-    var canvasSize: CGSize = .zero
+    var gridRows: Int = 5
+    var projectileSpeed: CGFloat = 12.0
+    var shotsPerRow: Int = 8
 
-    // Grid cell size (hex offset layout)
-    var cellW: CGFloat { BubbleShooterConstants.bubbleDiameter }
-    var cellH: CGFloat { BubbleShooterConstants.bubbleDiameter * 0.866 } // sqrt(3)/2
+    private var timer: Timer?
+    private var nextBubbleID: Int = 0
+    private var shotsSinceNewRow: Int = 0
+
+    var shooterY: CGFloat { canvasSize.height - 110 }
+
+    // MARK: Setup
 
     func setup(size: CGSize) {
         canvasSize = size
-        startNewGame()
+        projectile.x = size.width / 2
+        projectile.y = shooterY
     }
 
-    func startNewGame() {
-        stopTimer()
-        bubbles = []
+    func startGame() {
+        guard canvasSize != .zero else { return }
+        computeDifficulty()
         score = 0
         shots = 0
+        shotsSinceNewRow = 0
+        shotsUntilNewRow = shotsPerRow
+        popEffects = []
+        buildGrid()
+        pickNextColor()
+        currentColor = randomColor()
+        projectile = BubbleShooterProjectile(x: canvasSize.width / 2, y: shooterY,
+                                             vx: 0, vy: 0, color: currentColor, active: false)
+        aimAngle = -.pi / 2
         gameState = .aiming
-        projectile = nil
-        popFeedback = []
-        generateInitialRows()
-        nextColorIndex = rng.nextInt(BubbleShooterConstants.colors.count)
         startTimer()
     }
 
-    // MARK: - Grid helpers
-
-    func bubblePosition(col: Int, row: Int) -> CGPoint {
-        let offsetX = (row % 2 == 0) ? 0.0 : cellW / 2.0
-        let x = offsetX + cellW / 2.0 + CGFloat(col) * cellW
-        let y = cellH / 2.0 + CGFloat(row) * cellH
-        return CGPoint(x: x, y: y)
+    private func randomColor() -> BubbleShooterColor {
+        BubbleShooterColor.allCases[Int.random(in: 0..<difficulty.colorCount)]
     }
 
-    func gridCols(for row: Int) -> Int {
-        row % 2 == 0 ? BubbleShooterConstants.cols : BubbleShooterConstants.cols - 1
-    }
-
-    private func generateInitialRows() {
-        for row in 0..<BubbleShooterConstants.initialRows {
-            addRow(at: row)
-        }
-    }
-
-    private func addRow(at row: Int) {
-        let cols = gridCols(for: row)
-        for col in 0..<cols {
-            let colorIdx = rng.nextInt(BubbleShooterConstants.colors.count)
-            bubbles.append(BubbleShooterBubble(col: col, row: row, colorIndex: colorIdx))
-        }
-    }
-
-    // Push all rows down by 1 and add new row at top
-    private func addNewTopRow() {
-        for i in 0..<bubbles.count {
-            bubbles[i].row += 1
-        }
-        addRow(at: 0)
-        // Check game over: any bubble row >= bottom threshold
-        let maxAllowedRow = maxAllowedBubbleRow()
-        if bubbles.contains(where: { $0.row >= maxAllowedRow }) {
-            gameState = .gameOver
-        }
-    }
-
-    private func maxAllowedBubbleRow() -> Int {
-        // canvas height - shooter area; approximate row count
-        let shooterAreaHeight: CGFloat = 120
-        let usableHeight = canvasSize.height - shooterAreaHeight
-        return Int(usableHeight / cellH)
-    }
-
-    // MARK: - Shooting
-
-    func handleDrag(value: DragGesture.Value) {
-        guard gameState == .aiming else { return }
-        let shooterY = canvasSize.height - 90
-        let dx = value.location.x - canvasSize.width / 2
-        let dy = value.location.y - shooterY
-        // angle from shooter toward touch, clamped away from horizontal
-        var angle = atan2(dy, dx)
-        // clamp: must aim upward (dy negative means up)
-        // angle should be between -pi and 0 (pointing upward hemisphere)
-        // allow some wiggle: clamp between -pi+0.15 and -0.15
-        let minAngle = -Double.pi + 0.15
-        let maxAngle = -0.15
-        angle = max(minAngle, min(maxAngle, angle))
-        aimAngle = angle
-        isDragging = true
-    }
-
-    func handleDragEnd() {
-        guard gameState == .aiming else { return }
-        isDragging = false
-        fireProjectile()
-    }
-
-    private func fireProjectile() {
-        guard gameState == .aiming else { return }
-        let shooterX = canvasSize.width / 2
-        let shooterY = canvasSize.height - 90
-        let speed = BubbleShooterConstants.projectileSpeed
-        let dx = CGFloat(cos(aimAngle)) * speed
-        let dy = CGFloat(sin(aimAngle)) * speed
-        projectile = BubbleShooterProjectile(
-            x: shooterX, y: shooterY,
-            dx: dx, dy: dy,
-            colorIndex: nextColorIndex
-        )
-        shots += 1
-        nextColorIndex = rng.nextInt(BubbleShooterConstants.colors.count)
-        gameState = .shooting
-    }
-
-    // MARK: - Game Loop
-
-    private func startTimer() {
-        gameTimer = Timer(timeInterval: BubbleShooterConstants.tickInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.tick()
+    func buildGrid() {
+        bubbles = []
+        nextBubbleID = 0
+        for row in 0..<gridRows {
+            for col in 0..<columnsForRow(row) {
+                bubbles.append(BubbleShooterBubble(id: nextBubbleID, row: row, col: col, color: randomColor()))
+                nextBubbleID += 1
             }
         }
-        RunLoop.main.add(gameTimer!, forMode: .common)
     }
 
-    private func stopTimer() {
-        gameTimer?.invalidate()
-        gameTimer = nil
+    func columnsForRow(_ row: Int) -> Int {
+        let base = Int(canvasSize.width / (bubbleRadius * 2.0))
+        return row % 2 == 0 ? base : base - 1
     }
 
-    private func tick() {
-        guard gameState == .shooting, var proj = projectile else { return }
+    func bubblePosition(row: Int, col: Int) -> CGPoint {
+        // Every row is laid out from the same origin so the hex offset
+        // stays centred instead of pushing odd rows off the right edge.
+        let baseCols = columnsForRow(0)
+        let totalWidth = CGFloat(baseCols) * bubbleRadius * 2
+        let startX = (canvasSize.width - totalWidth) / 2 + bubbleRadius
+        let xOff = row % 2 == 1 ? bubbleRadius : 0
+        return CGPoint(
+            x: startX + CGFloat(col) * bubbleRadius * 2 + xOff,
+            y: topOffset + CGFloat(row) * hexRowHeight
+        )
+    }
 
-        let dt = CGFloat(BubbleShooterConstants.tickInterval)
-        proj.x += proj.dx * dt
-        proj.y += proj.dy * dt
+    // MARK: Aim & fire
 
-        // Wall bouncing (left/right)
-        let r = BubbleShooterConstants.bubbleRadius
-        if proj.x - r < 0 {
-            proj.x = r
-            proj.dx = abs(proj.dx)
-        } else if proj.x + r > canvasSize.width {
-            proj.x = canvasSize.width - r
-            proj.dx = -abs(proj.dx)
+    func updateAim(location: CGPoint) {
+        guard gameState == .aiming, !projectile.active else { return }
+        let dx = location.x - canvasSize.width / 2
+        let dy = location.y - shooterY
+        var angle = atan2(dy, dx)
+        angle = max(-.pi + 0.18, min(-0.18, angle))
+        aimAngle = angle
+    }
+
+    func fire() {
+        guard gameState == .aiming, !projectile.active else { return }
+        projectile.x = canvasSize.width / 2
+        projectile.y = shooterY
+        projectile.vx = cos(aimAngle) * projectileSpeed
+        projectile.vy = sin(aimAngle) * projectileSpeed
+        projectile.color = currentColor
+        projectile.active = true
+        shots += 1
+        shotsSinceNewRow += 1
+        shotsUntilNewRow = max(0, shotsPerRow - shotsSinceNewRow)
+        currentColor = nextColor
+        pickNextColor()
+    }
+
+    func pickNextColor() {
+        nextColor = randomColor()
+    }
+
+    // MARK: Loop
+
+    func startTimer() {
+        timer?.invalidate()
+        let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.tick()
+        }
+        timer = t
+        RunLoop.main.add(t, forMode: .common)
+    }
+
+    func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    func tick() {
+        guard gameState == .aiming else { return }
+        moveProjectile()
+        updatePopEffects()
+    }
+
+    private func moveProjectile() {
+        guard projectile.active else { return }
+
+        projectile.x += projectile.vx
+        projectile.y += projectile.vy
+
+        if projectile.x - bubbleRadius < 0 {
+            projectile.x = bubbleRadius
+            projectile.vx = abs(projectile.vx)
+        } else if projectile.x + bubbleRadius > canvasSize.width {
+            projectile.x = canvasSize.width - bubbleRadius
+            projectile.vx = -abs(projectile.vx)
         }
 
-        // Ceiling
-        if proj.y - r < 0 {
-            proj.y = r
-            // snap to grid
-            projectile = proj
+        if projectile.y - bubbleRadius < topOffset - hexRowHeight {
             snapProjectile()
             return
         }
 
-        // Check collision with existing bubbles
         for bubble in bubbles {
-            let bPos = bubblePosition(col: bubble.col, row: bubble.row)
-            let dist = hypot(proj.x - bPos.x, proj.y - bPos.y)
-            if dist < BubbleShooterConstants.bubbleDiameter * 0.9 {
-                projectile = proj
+            let pos = bubblePosition(row: bubble.row, col: bubble.col)
+            let dx = projectile.x - pos.x
+            let dy = projectile.y - pos.y
+            if sqrt(dx * dx + dy * dy) < bubbleRadius * 1.85 {
                 snapProjectile()
                 return
             }
         }
 
-        projectile = proj
+        if projectile.y > canvasSize.height + bubbleRadius {
+            projectile.active = false
+        }
     }
 
     private func snapProjectile() {
-        guard var proj = projectile else { return }
-
-        // Find nearest grid cell that is empty
-        let nearestCell = findNearestEmptyCell(x: proj.x, y: proj.y)
-        let newBubble = BubbleShooterBubble(col: nearestCell.col, row: nearestCell.row, colorIndex: proj.colorIndex)
+        projectile.active = false
+        let (row, col) = findSnapPosition(x: projectile.x, y: projectile.y)
+        let newBubble = BubbleShooterBubble(id: nextBubbleID, row: row, col: col, color: projectile.color)
+        nextBubbleID += 1
         bubbles.append(newBubble)
-        projectile = nil
 
-        // Check for matches
-        let matched = findMatches(startId: newBubble.id, colorIndex: newBubble.colorIndex)
+        let matched = findMatches(id: newBubble.id, color: newBubble.color)
         if matched.count >= 3 {
-            score += matched.count * BubbleShooterConstants.popScore
-            let matchedBubbles = bubbles.filter { matched.contains($0.id) }
-            popFeedback = matchedBubbles
-            bubbles.removeAll { matched.contains($0.id) }
-            // Find disconnected bubbles
-            let disconnected = findDisconnectedBubbles()
-            if !disconnected.isEmpty {
-                score += disconnected.count * BubbleShooterConstants.popScore
-                bubbles.removeAll { disconnected.contains($0.id) }
+            score += matched.count * 30
+            spawnPops(for: matched)
+            let matchedIDs = Set(matched.map { $0.id })
+            bubbles.removeAll { matchedIDs.contains($0.id) }
+
+            // Anything no longer hanging from the ceiling falls too.
+            let dropped = findDisconnected()
+            if !dropped.isEmpty {
+                score += dropped.count * 20
+                spawnPops(for: dropped)
+                let droppedIDs = Set(dropped.map { $0.id })
+                bubbles.removeAll { droppedIDs.contains($0.id) }
             }
-            // Clear pop feedback after short delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.popFeedback = []
+
+            if bubbles.isEmpty {
+                score += 500
+                clearBoardBonus()
+                return
             }
         }
 
-        // Every N shots add a new row
-        if shots % BubbleShooterConstants.newRowEveryShots == 0 {
-            addNewTopRow()
+        if shotsSinceNewRow >= shotsPerRow {
+            shotsSinceNewRow = 0
+            addNewRow()
         }
+        shotsUntilNewRow = max(0, shotsPerRow - shotsSinceNewRow)
 
-        // Check game over
-        let maxRow = maxAllowedBubbleRow()
-        if bubbles.contains(where: { $0.row >= maxRow }) {
-            gameState = .gameOver
-            stopTimer()
-            return
-        }
-
-        gameState = .aiming
+        checkGameOver()
     }
 
-    private func findNearestEmptyCell(x: CGFloat, y: CGFloat) -> (col: Int, row: Int) {
-        // Estimate row from y
-        var bestRow = max(0, Int(y / cellH))
+    private func spawnPops(for list: [BubbleShooterBubble]) {
+        for b in list {
+            popEffects.append(
+                BubbleShooterPopEffect(
+                    id: nextBubbleID + popEffects.count,
+                    position: bubblePosition(row: b.row, col: b.col),
+                    color: b.color.color
+                )
+            )
+        }
+    }
+
+    /// Clearing the board refills it — the run keeps going and gets a bonus.
+    private func clearBoardBonus() {
+        gridRows = min(gridRows + 1, 9)
+        buildGrid()
+        shotsSinceNewRow = 0
+        shotsUntilNewRow = shotsPerRow
+    }
+
+    private func findSnapPosition(x: CGFloat, y: CGFloat) -> (Int, Int) {
+        var bestRow = 0
         var bestCol = 0
         var bestDist = CGFloat.infinity
 
-        // Search nearby rows
-        for rowOffset in -1...1 {
-            let row = max(0, bestRow + rowOffset)
-            let cols = gridCols(for: row)
-            for col in 0..<cols {
-                // Skip occupied cells
-                if bubbles.contains(where: { $0.col == col && $0.row == row }) { continue }
-                let pos = bubblePosition(col: col, row: row)
-                let dist = hypot(x - pos.x, y - pos.y)
+        let maxRow = Int((canvasSize.height - topOffset) / hexRowHeight) + 1
+        for row in 0..<max(maxRow, 6) {
+            for col in 0..<columnsForRow(row) {
+                let occupied = bubbles.contains { $0.row == row && $0.col == col }
+                guard !occupied else { continue }
+                let pos = bubblePosition(row: row, col: col)
+                let dx = x - pos.x
+                let dy = y - pos.y
+                let dist = sqrt(dx * dx + dy * dy)
                 if dist < bestDist {
                     bestDist = dist
                     bestRow = row
@@ -316,351 +325,464 @@ final class BubbleShooterViewModel: ObservableObject {
                 }
             }
         }
-
-        // If still no empty found, brute search closest empty
-        if bestDist == .infinity {
-            for b in bubbles {
-                let neighbors = getNeighbors(col: b.col, row: b.row)
-                for n in neighbors {
-                    if !bubbles.contains(where: { $0.col == n.col && $0.row == n.row }) {
-                        let pos = bubblePosition(col: n.col, row: n.row)
-                        let dist = hypot(x - pos.x, y - pos.y)
-                        if dist < bestDist {
-                            bestDist = dist
-                            bestRow = n.row
-                            bestCol = n.col
-                        }
-                    }
-                }
-            }
-        }
-
-        return (col: bestCol, row: max(0, bestRow))
+        return (bestRow, bestCol)
     }
 
-    // MARK: - Match detection
+    private func findMatches(id: Int, color: BubbleShooterColor) -> [BubbleShooterBubble] {
+        var visited = Set<Int>()
+        var queue: [BubbleShooterBubble] = []
+        var result: [BubbleShooterBubble] = []
 
-    private func findMatches(startId: UUID, colorIndex: Int) -> Set<UUID> {
-        guard let startBubble = bubbles.first(where: { $0.id == startId }) else { return [] }
-        var visited = Set<UUID>()
-        var queue = [startBubble]
-        visited.insert(startBubble.id)
+        guard let start = bubbles.first(where: { $0.id == id }) else { return [] }
+        queue.append(start)
+        visited.insert(start.id)
 
         while !queue.isEmpty {
             let current = queue.removeFirst()
-            let neighbors = getNeighborBubbles(col: current.col, row: current.row)
-            for neighbor in neighbors {
-                if !visited.contains(neighbor.id) && neighbor.colorIndex == colorIndex {
-                    visited.insert(neighbor.id)
-                    queue.append(neighbor)
-                }
+            result.append(current)
+            for n in getNeighbors(row: current.row, col: current.col) where !visited.contains(n.id) && n.color == color {
+                visited.insert(n.id)
+                queue.append(n)
             }
         }
-        return visited
+        return result
     }
 
-    private func findDisconnectedBubbles() -> Set<UUID> {
-        // BFS from all top-row bubbles (row == 0)
-        let topBubbles = bubbles.filter { $0.row == 0 }
-        var connected = Set<UUID>()
-        var queue = topBubbles
-        for b in topBubbles { connected.insert(b.id) }
+    private func getNeighbors(row: Int, col: Int) -> [BubbleShooterBubble] {
+        let offsets: [(Int, Int)] = row % 2 == 0
+            ? [(-1, -1), (-1, 0), (0, -1), (0, 1), (1, -1), (1, 0)]
+            : [(-1, 0), (-1, 1), (0, -1), (0, 1), (1, 0), (1, 1)]
+        return offsets.compactMap { (dr, dc) in
+            bubbles.first { $0.row == row + dr && $0.col == col + dc }
+        }
+    }
 
-        while !queue.isEmpty {
-            let current = queue.removeFirst()
-            let neighbors = getNeighborBubbles(col: current.col, row: current.row)
-            for neighbor in neighbors {
-                if !connected.contains(neighbor.id) {
-                    connected.insert(neighbor.id)
-                    queue.append(neighbor)
-                }
+    private func findDisconnected() -> [BubbleShooterBubble] {
+        var connectedIDs = Set<Int>()
+        var queue = bubbles.filter { $0.row == 0 }
+        for b in queue { connectedIDs.insert(b.id) }
+
+        var i = 0
+        while i < queue.count {
+            let current = queue[i]
+            i += 1
+            for n in getNeighbors(row: current.row, col: current.col) where !connectedIDs.contains(n.id) {
+                connectedIDs.insert(n.id)
+                queue.append(n)
             }
         }
-
-        let disconnected = bubbles.filter { !connected.contains($0.id) }
-        return Set(disconnected.map { $0.id })
+        return bubbles.filter { !connectedIDs.contains($0.id) }
     }
 
-    // MARK: - Neighbor helpers
-
-    private func getNeighborBubbles(col: Int, row: Int) -> [BubbleShooterBubble] {
-        let neighborCells = getNeighbors(col: col, row: row)
-        return bubbles.filter { b in neighborCells.contains(where: { $0.col == b.col && $0.row == b.row }) }
+    private func addNewRow() {
+        for i in bubbles.indices { bubbles[i].row += 1 }
+        for col in 0..<columnsForRow(0) {
+            bubbles.append(BubbleShooterBubble(id: nextBubbleID, row: 0, col: col, color: randomColor()))
+            nextBubbleID += 1
+        }
     }
 
-    private func getNeighbors(col: Int, row: Int) -> [(col: Int, row: Int)] {
-        let isEvenRow = row % 2 == 0
-        // hex grid neighbors
-        var neighbors: [(col: Int, row: Int)] = [
-            (col - 1, row),
-            (col + 1, row),
-            (col, row - 1),
-            (col, row + 1)
-        ]
-        if isEvenRow {
-            neighbors.append((col - 1, row - 1))
-            neighbors.append((col - 1, row + 1))
+    private func checkGameOver() {
+        let limit = shooterY - bubbleRadius * 2
+        for bubble in bubbles {
+            if bubblePosition(row: bubble.row, col: bubble.col).y >= limit {
+                endGame()
+                return
+            }
+        }
+    }
+
+    func endGame() {
+        stopTimer()
+        gameState = .gameOver
+        roundScores.append(score)
+        if roundScores.count > 5 {
+            roundScores = Array(roundScores.suffix(5))
+        }
+    }
+
+    func computeDifficulty() {
+        guard !roundScores.isEmpty else {
+            difficulty = .medium
+            gridRows = 5
+            projectileSpeed = 12.0
+            shotsPerRow = 8
+            return
+        }
+        let avg = Double(roundScores.reduce(0, +)) / Double(roundScores.count)
+        if avg < 400 {
+            difficulty = .easy
+            gridRows = 4
+            projectileSpeed = 11.0
+            shotsPerRow = 10
+        } else if avg < 1200 {
+            difficulty = .medium
+            gridRows = 5
+            projectileSpeed = 12.5
+            shotsPerRow = 8
         } else {
-            neighbors.append((col + 1, row - 1))
-            neighbors.append((col + 1, row + 1))
+            difficulty = .hard
+            gridRows = 7
+            projectileSpeed = 14.5
+            shotsPerRow = 6
         }
-        return neighbors.filter { $0.col >= 0 && $0.row >= 0 && $0.col < BubbleShooterConstants.cols }
+    }
+
+    private func updatePopEffects() {
+        popEffects = popEffects.compactMap { effect in
+            var e = effect
+            e.lifetime -= 1.0 / 60.0
+            e.scale += 0.05
+            e.opacity = max(0, e.lifetime / e.maxLifetime)
+            return e.lifetime > 0 ? e : nil
+        }
+    }
+
+    deinit {
+        timer?.invalidate()
     }
 }
 
 // MARK: - Main View
 
 struct BubbleShooterView: View {
-    @StateObject private var vm = BubbleShooterViewModel()
-    @State private var canvasSize: CGSize = .zero
+    @StateObject private var engine = BubbleShooterEngine()
+    @AppStorage("bubbleShooterBestScore") private var bestScore: Int = 0
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
-        ZStack {
-            // Background
-            LinearGradient(
-                colors: [Color(red: 0.05, green: 0.05, blue: 0.18), Color(red: 0.1, green: 0.05, blue: 0.25)],
-                startPoint: .top, endPoint: .bottom
-            )
-            .ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack {
+                backgroundGradient
 
-            GeometryReader { geo in
-                ZStack {
-                    // Grid bubbles
-                    ForEach(vm.bubbles) { bubble in
-                        BubbleShooterBubbleView(colorIndex: bubble.colorIndex, isPopping: false)
-                            .position(vm.bubblePosition(col: bubble.col, row: bubble.row))
+                BubbleShooterGameCanvas(engine: engine)
+
+                VStack {
+                    topBar
+                    Spacer()
+                    if engine.gameState == .aiming {
+                        bottomShooterUI
                     }
+                }
 
-                    // Pop feedback
-                    ForEach(vm.popFeedback) { bubble in
-                        BubbleShooterBubbleView(colorIndex: bubble.colorIndex, isPopping: true)
-                            .position(vm.bubblePosition(col: bubble.col, row: bubble.row))
-                    }
+                ForEach(engine.popEffects) { effect in
+                    Circle()
+                        .fill(effect.color.opacity(effect.opacity))
+                        .frame(width: engine.bubbleRadius * 2 * effect.scale,
+                               height: engine.bubbleRadius * 2 * effect.scale)
+                        .position(effect.position)
+                        .allowsHitTesting(false)
+                }
 
-                    // Projectile
-                    if let proj = vm.projectile {
-                        BubbleShooterBubbleView(colorIndex: proj.colorIndex, isPopping: false)
-                            .position(x: proj.x, y: proj.y)
-                    }
+                if engine.gameState == .idle {
+                    idleOverlay
+                } else if engine.gameState == .gameOver {
+                    gameOverOverlay
+                }
+            }
+            .onAppear { engine.setup(size: geo.size) }
+            .onChange(of: engine.gameState) { _, state in
+                if state == .gameOver { bestScore = max(bestScore, engine.score) }
+            }
+            .onDisappear { engine.stopTimer() }
+        }
+        .preferredColorScheme(.dark)
+    }
 
-                    // Aim line
-                    if vm.gameState == .aiming && vm.isDragging {
-                        BubbleShooterAimLine(
-                            from: CGPoint(x: geo.size.width / 2, y: geo.size.height - 90),
-                            angle: vm.aimAngle,
-                            canvasWidth: geo.size.width
+    var backgroundGradient: some View {
+        LinearGradient(
+            colors: colorScheme == .dark
+                ? [Color(red: 0.04, green: 0.04, blue: 0.18), Color(red: 0.08, green: 0.04, blue: 0.22)]
+                : [Color(red: 0.82, green: 0.88, blue: 1.0), Color(red: 0.72, green: 0.78, blue: 0.97)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
+
+    var topBar: some View {
+        HStack(spacing: 10) {
+            glassLabel {
+                VStack(spacing: 2) {
+                    Text("SCORE")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundColor(.secondary)
+                    Text("\(engine.score)")
+                        .font(.system(size: 20, weight: .black, design: .rounded))
+                        .foregroundColor(.primary)
+                }
+            }
+
+            Spacer()
+
+            glassLabel {
+                VStack(spacing: 2) {
+                    Text("NEW ROW IN")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundColor(.secondary)
+                    Text("\(engine.shotsUntilNewRow)")
+                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .foregroundColor(engine.shotsUntilNewRow <= 2 ? .red : .primary)
+                }
+            }
+
+            Spacer()
+
+            glassLabel {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(engine.difficulty.badgeColor)
+                        .frame(width: 8, height: 8)
+                    Text(engine.difficulty.rawValue)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(engine.difficulty.badgeColor)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+    }
+
+    var bottomShooterUI: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 4) {
+                Text("NEXT")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundColor(.secondary)
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [engine.nextColor.color.opacity(0.95), engine.nextColor.color.opacity(0.6)],
+                            center: .topLeading, startRadius: 0, endRadius: 20
                         )
-                    }
-
-                    // Shooter
-                    BubbleShooterShooterView(
-                        nextColorIndex: vm.nextColorIndex,
-                        canvasWidth: geo.size.width
                     )
-                    .position(x: geo.size.width / 2, y: geo.size.height - 90)
+                    .overlay(Circle().stroke(Color.white.opacity(0.5), lineWidth: 1))
+                    .frame(width: 30, height: 30)
+                    .shadow(color: engine.nextColor.color.opacity(0.5), radius: 6)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .padding(.trailing, 18)
+            .padding(.bottom, 34)
+        }
+    }
 
-                    // Game over overlay
-                    if vm.gameState == .gameOver {
-                        BubbleShooterGameOverView(score: vm.score) {
-                            vm.setup(size: geo.size)
-                        }
+    func glassLabel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(.horizontal, 13)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.3), lineWidth: 1))
+    }
+
+    var idleOverlay: some View {
+        overlayCard {
+            VStack(spacing: 20) {
+                Text("BUBBLE SHOOTER")
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .foregroundStyle(LinearGradient(colors: [.cyan, .purple, .pink], startPoint: .leading, endPoint: .trailing))
+                    .multilineTextAlignment(.center)
+
+                VStack(spacing: 8) {
+                    Text("Drag to aim · release to fire")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.secondary)
+                    Text("Match 3+ to pop · cut them loose to drop clusters")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                    if bestScore > 0 {
+                        Text("Best: \(bestScore)")
+                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .foregroundColor(.primary)
                     }
                 }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            if vm.canvasSize == .zero {
-                                vm.setup(size: geo.size)
-                            }
-                            vm.handleDrag(value: value)
-                        }
-                        .onEnded { _ in
-                            vm.handleDragEnd()
-                        }
-                )
-                .onAppear {
-                    vm.setup(size: geo.size)
-                }
-            }
 
-            // HUD
-            VStack {
-                BubbleShooterHUDView(score: vm.score, shots: vm.shots)
-                Spacer()
+                capsuleButton(title: "TAP TO PLAY", colors: [.cyan, .purple]) { engine.startGame() }
             }
-            .padding(.top, 8)
+        }
+    }
+
+    var gameOverOverlay: some View {
+        overlayCard {
+            VStack(spacing: 16) {
+                Text("GAME OVER")
+                    .font(.system(size: 32, weight: .black, design: .rounded))
+                    .foregroundStyle(LinearGradient(colors: [.red, .orange], startPoint: .leading, endPoint: .trailing))
+
+                Text("Score: \(engine.score)")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                Text("Best: \(bestScore) · \(engine.shots) shots")
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundColor(.secondary)
+
+                HStack(spacing: 8) {
+                    Text("Next difficulty:")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+                    HStack(spacing: 5) {
+                        Circle().fill(engine.difficulty.badgeColor).frame(width: 9, height: 9)
+                        Text(engine.difficulty.rawValue)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundColor(engine.difficulty.badgeColor)
+                    }
+                }
+
+                capsuleButton(title: "PLAY AGAIN", colors: [.orange, .red]) { engine.startGame() }
+            }
+        }
+    }
+
+    private func overlayCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ZStack {
+            Color.black.opacity(0.4).ignoresSafeArea()
+            content()
+                .padding(26)
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 28))
+                .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color.white.opacity(0.25), lineWidth: 1))
+                .padding(.horizontal, 28)
+        }
+    }
+
+    private func capsuleButton(title: String, colors: [Color], action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .padding(.horizontal, 40)
+                .padding(.vertical, 13)
+                .background(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
+                .clipShape(Capsule())
+                .shadow(color: colors[0].opacity(0.45), radius: 12, x: 0, y: 5)
         }
     }
 }
 
-// MARK: - Bubble View
+// MARK: - Canvas
+
+struct BubbleShooterGameCanvas: View {
+    @ObservedObject var engine: BubbleShooterEngine
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                ForEach(engine.bubbles) { bubble in
+                    BubbleShooterBubbleView(color: bubble.color.color, radius: engine.bubbleRadius)
+                        .position(engine.bubblePosition(row: bubble.row, col: bubble.col))
+                }
+
+                if engine.gameState == .aiming && !engine.projectile.active {
+                    BubbleShooterAimLine(
+                        from: CGPoint(x: engine.canvasSize.width / 2, y: engine.shooterY),
+                        angle: engine.aimAngle,
+                        color: engine.currentColor.color
+                    )
+                }
+
+                if engine.gameState != .idle {
+                    BubbleShooterShooterBase(
+                        currentColor: engine.currentColor.color,
+                        radius: engine.bubbleRadius,
+                        x: engine.canvasSize.width / 2,
+                        y: engine.shooterY
+                    )
+                }
+
+                if engine.projectile.active {
+                    BubbleShooterBubbleView(color: engine.projectile.color.color, radius: engine.bubbleRadius)
+                        .position(CGPoint(x: engine.projectile.x, y: engine.projectile.y))
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        engine.updateAim(location: value.location)
+                    }
+                    .onEnded { value in
+                        engine.updateAim(location: value.location)
+                        engine.fire()
+                    }
+            )
+            .onAppear {
+                if engine.canvasSize == .zero { engine.setup(size: geo.size) }
+            }
+        }
+    }
+}
 
 struct BubbleShooterBubbleView: View {
-    let colorIndex: Int
-    let isPopping: Bool
-
-    private var color: Color {
-        BubbleShooterConstants.colors[colorIndex % BubbleShooterConstants.colors.count]
-    }
+    let color: Color
+    let radius: CGFloat
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [color.opacity(0.9), color, color.opacity(0.6)],
-                        center: UnitPoint(x: 0.35, y: 0.3),
-                        startRadius: 2,
-                        endRadius: BubbleShooterConstants.bubbleRadius
-                    )
+        Circle()
+            .fill(
+                RadialGradient(
+                    colors: [color.opacity(1.0), color.opacity(0.65)],
+                    center: UnitPoint(x: 0.35, y: 0.3),
+                    startRadius: 1,
+                    endRadius: radius * 1.3
                 )
-                .frame(width: BubbleShooterConstants.bubbleDiameter - 4,
-                       height: BubbleShooterConstants.bubbleDiameter - 4)
-                .shadow(color: color.opacity(0.6), radius: 4, x: 0, y: 2)
-
-            // Shine
-            Circle()
-                .fill(Color.white.opacity(0.35))
-                .frame(width: 10, height: 10)
-                .offset(x: -6, y: -6)
-        }
-        .scaleEffect(isPopping ? 1.4 : 1.0)
-        .opacity(isPopping ? 0.0 : 1.0)
-        .animation(isPopping ? .easeOut(duration: 0.3) : .none, value: isPopping)
+            )
+            .overlay(
+                Circle()
+                    .fill(Color.white.opacity(0.35))
+                    .frame(width: radius * 0.5, height: radius * 0.4)
+                    .offset(x: -radius * 0.28, y: -radius * 0.32)
+            )
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1))
+            .frame(width: radius * 2, height: radius * 2)
     }
 }
-
-// MARK: - Aim Line View
 
 struct BubbleShooterAimLine: View {
     let from: CGPoint
-    let angle: Double
-    let canvasWidth: CGFloat
+    let angle: CGFloat
+    let color: Color
 
     var body: some View {
-        Canvas { context, _ in
-            let dotCount = 12
-            let spacing: CGFloat = 28
-            for i in 0..<dotCount {
-                let t = CGFloat(i) * spacing
-                let x = from.x + CGFloat(cos(angle)) * t
-                let y = from.y + CGFloat(sin(angle)) * t
-                let rect = CGRect(x: x - 3, y: y - 3, width: 6, height: 6)
-                let opacity = 1.0 - Double(i) / Double(dotCount)
-                context.fill(
-                    Path(ellipseIn: rect),
-                    with: .color(Color.white.opacity(opacity * 0.7))
-                )
-            }
+        Path { path in
+            path.move(to: from)
+            path.addLine(to: CGPoint(
+                x: from.x + cos(angle) * 220,
+                y: from.y + sin(angle) * 220
+            ))
         }
+        .stroke(
+            color.opacity(0.55),
+            style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [8, 10])
+        )
+        .allowsHitTesting(false)
     }
 }
 
-// MARK: - Shooter View
-
-struct BubbleShooterShooterView: View {
-    let nextColorIndex: Int
-    let canvasWidth: CGFloat
-
-    private var color: Color {
-        BubbleShooterConstants.colors[nextColorIndex % BubbleShooterConstants.colors.count]
-    }
+struct BubbleShooterShooterBase: View {
+    let currentColor: Color
+    let radius: CGFloat
+    let x: CGFloat
+    let y: CGFloat
 
     var body: some View {
         ZStack {
-            // Base
             Circle()
-                .fill(Color.white.opacity(0.12))
-                .frame(width: 60, height: 60)
-                .overlay(
-                    Circle().stroke(Color.white.opacity(0.3), lineWidth: 2)
-                )
+                .fill(.ultraThinMaterial)
+                .overlay(Circle().stroke(Color.white.opacity(0.35), lineWidth: 2))
+                .frame(width: radius * 2.8, height: radius * 2.8)
+                .shadow(color: currentColor.opacity(0.4), radius: 10)
 
-            // Next bubble preview
-            BubbleShooterBubbleView(colorIndex: nextColorIndex, isPopping: false)
+            BubbleShooterBubbleView(color: currentColor, radius: radius)
         }
+        .position(CGPoint(x: x, y: y))
     }
 }
 
-// MARK: - HUD View
-
-struct BubbleShooterHUDView: View {
-    let score: Int
-    let shots: Int
-
-    var body: some View {
-        HStack(spacing: 24) {
-            BubbleShooterStatBox(label: "SCORE", value: "\(score)")
-            Spacer()
-            BubbleShooterStatBox(label: "SHOTS", value: "\(shots)")
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(Color.black.opacity(0.35))
-        .cornerRadius(12)
-        .padding(.horizontal, 16)
-    }
-}
-
-struct BubbleShooterStatBox: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        VStack(spacing: 2) {
-            Text(label)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white.opacity(0.6))
-            Text(value)
-                .font(.system(size: 22, weight: .bold, design: .monospaced))
-                .foregroundColor(.white)
-        }
-    }
-}
-
-// MARK: - Game Over View
-
-struct BubbleShooterGameOverView: View {
-    let score: Int
-    let onRestart: () -> Void
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.7)
-                .ignoresSafeArea()
-
-            VStack(spacing: 20) {
-                Text("GAME OVER")
-                    .font(.system(size: 34, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-
-                Text("Score: \(score)")
-                    .font(.system(size: 22, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.yellow)
-
-                Button(action: onRestart) {
-                    Text("Play Again")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 36)
-                        .padding(.vertical, 14)
-                        .background(
-                            LinearGradient(
-                                colors: [Color.purple, Color.blue],
-                                startPoint: .leading, endPoint: .trailing
-                            )
-                        )
-                        .cornerRadius(30)
-                        .shadow(color: .purple.opacity(0.5), radius: 10)
-                }
-            }
-            .padding(40)
-            .background(
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color(red: 0.1, green: 0.08, blue: 0.2))
-                    .shadow(color: .black.opacity(0.5), radius: 20)
-            )
-        }
-    }
+#Preview {
+    BubbleShooterView()
 }

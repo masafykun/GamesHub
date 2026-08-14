@@ -2,28 +2,29 @@ import SwiftUI
 
 // MARK: - Supporting Types
 
-enum ClWvGamePhase {
+enum ColorWavePhase {
     case start, playing, gameOver
 }
 
-struct ClWvBand: Identifiable {
+struct ColorWaveBand: Identifiable {
     let id = UUID()
     var hue: Double
     var yOffset: CGFloat
 }
 
-// MARK: - Main View
+// MARK: -  View (Glassmorphism + Adaptive Difficulty)
 
 struct ColorWaveView: View {
-    @State private var phase: ClWvGamePhase = .start
+    @State private var phase: ColorWavePhase = .start
     @State private var score: Int = 0
     @State private var lives: Int = 5
-    @State private var bands: [ClWvBand] = []
+    @State private var bands: [ColorWaveBand] = []
     @State private var targetHue: Double = 0.0
     @State private var speed: Double = 60.0
     @State private var lastUpdate: Date = Date()
     @State private var hitFeedback: String = ""
     @State private var feedbackOpacity: Double = 0
+    @State private var recentResults: [Bool] = []
 
     let bandHeight: CGFloat = 80
     let markerY: CGFloat = 300
@@ -31,78 +32,117 @@ struct ColorWaveView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            LinearGradient(
+                colors: [Color(hue: 0.62, saturation: 0.7, brightness: 0.3),
+                         Color(hue: 0.85, saturation: 0.6, brightness: 0.2)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            ).ignoresSafeArea()
+
             switch phase {
-            case .start:
-                startScreen
-            case .playing:
-                gameScreen
-            case .gameOver:
-                gameOverScreen
+            case .start: startScreen
+            case .playing: gameScreen
+            case .gameOver: gameOverScreen
             }
         }
+    }
+
+    // MARK: - Glass Panel Helper
+
+    func glassPanel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.3), lineWidth: 1))
     }
 
     // MARK: - Screens
 
     var startScreen: some View {
-        VStack(spacing: 24) {
-            Text("COLOR WAVE").font(.system(size: 40, weight: .black)).foregroundColor(.white)
-            Text("Tap when the matching color\npasses the marker line")
-                .multilineTextAlignment(.center).foregroundColor(.gray)
+        VStack(spacing: 32) {
+            Text("COLOR WAVE")
+                .font(.system(size: 40, weight: .black))
+                .foregroundColor(.white)
+                .shadow(color: .white.opacity(0.4), radius: 8)
+
+            glassPanel {
+                VStack(spacing: 8) {
+                    Text("Tap when the matching color").foregroundColor(.white.opacity(0.9))
+                    Text("passes the marker line").foregroundColor(.white.opacity(0.9))
+                    Text("Adaptive difficulty — get better, it gets harder!")
+                        .font(.caption).foregroundColor(.white.opacity(0.6))
+                }.padding(20)
+            }.padding(.horizontal)
+
             Button(action: startGame) {
-                Text("PLAY").font(.title2.bold())
-                    .foregroundColor(.black).padding(.horizontal, 48).padding(.vertical, 14)
-                    .background(Color.white).cornerRadius(30)
+                Text("PLAY").font(.title2.bold()).foregroundColor(.white)
+                    .padding(.horizontal, 48).padding(.vertical, 14)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 30))
+                    .overlay(RoundedRectangle(cornerRadius: 30).stroke(.white.opacity(0.5), lineWidth: 1))
             }
         }
     }
 
     var gameScreen: some View {
         ZStack {
-            // Scrolling bands
             GeometryReader { geo in
                 ForEach(bands) { band in
                     Rectangle()
-                        .fill(Color(hue: band.hue, saturation: 0.85, brightness: 0.95))
+                        .fill(Color(hue: band.hue, saturation: 0.85, brightness: 0.95).opacity(0.85))
                         .frame(width: geo.size.width, height: bandHeight)
                         .position(x: geo.size.width / 2, y: band.yOffset)
                 }
                 // Marker line
-                Rectangle()
-                    .fill(Color.white.opacity(0.9))
-                    .frame(width: geo.size.width, height: 3)
-                    .position(x: geo.size.width / 2, y: markerY)
-                    .shadow(color: .white, radius: 4)
+                ZStack {
+                    Rectangle().fill(.white.opacity(0.9)).frame(width: geo.size.width, height: 3)
+                    Text("TAP HERE").font(.caption2.bold()).foregroundColor(.white.opacity(0.7))
+                        .offset(x: geo.size.width / 2 - 50, y: -12)
+                }.position(x: geo.size.width / 2, y: markerY)
             }
             .contentShape(Rectangle())
             .onTapGesture { handleTap() }
 
-            // HUD
             VStack {
-                HStack {
-                    Text("Score: \(score)").foregroundColor(.white).bold()
-                    Spacer()
-                    HStack(spacing: 4) {
-                        ForEach(0..<5, id: \.self) { i in
-                            Image(systemName: i < lives ? "heart.fill" : "heart")
-                                .foregroundColor(i < lives ? .red : .gray)
+                glassPanel {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("SCORE").font(.caption.bold()).foregroundColor(.white.opacity(0.6))
+                            Text("\(score)").font(.title2.bold()).foregroundColor(.white)
                         }
-                    }
-                }.padding()
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("LIVES").font(.caption.bold()).foregroundColor(.white.opacity(0.6))
+                            HStack(spacing: 4) {
+                                ForEach(0..<5, id: \.self) { i in
+                                    Image(systemName: i < lives ? "heart.fill" : "heart")
+                                        .foregroundColor(i < lives ? .red : .gray.opacity(0.5))
+                                        .font(.caption)
+                                }
+                            }
+                        }
+                    }.padding(.horizontal, 16).padding(.vertical, 10)
+                }.padding(.horizontal).padding(.top, 8)
+
                 Spacer()
-                // Target swatch + feedback
-                VStack(spacing: 8) {
-                    Text(hitFeedback).font(.title.bold()).foregroundColor(.white)
-                        .opacity(feedbackOpacity)
-                    HStack(spacing: 16) {
-                        Text("TARGET").foregroundColor(.white.opacity(0.7)).font(.caption.bold())
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(hue: targetHue, saturation: 0.85, brightness: 0.95))
-                            .frame(width: 60, height: 40)
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white, lineWidth: 2))
-                    }
-                }.padding(.bottom, 40)
+
+                glassPanel {
+                    VStack(spacing: 10) {
+                        Text(hitFeedback).font(.title3.bold()).foregroundColor(.white)
+                            .opacity(feedbackOpacity)
+                        HStack(spacing: 16) {
+                            Text("TARGET").font(.caption.bold()).foregroundColor(.white.opacity(0.7))
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(hue: targetHue, saturation: 0.85, brightness: 0.95))
+                                .frame(width: 70, height: 44)
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.5), lineWidth: 1))
+                        }
+                        if recentResults.count >= 5 {
+                            let streak = recentResults.suffix(5).filter { $0 }.count
+                            Text(streak >= 4 ? "On fire! Speed up!" : "Keep going!")
+                                .font(.caption2).foregroundColor(.white.opacity(0.5))
+                        }
+                    }.padding(16)
+                }.padding(.horizontal).padding(.bottom, 32)
             }
         }
         .onAppear { lastUpdate = Date() }
@@ -113,15 +153,30 @@ struct ColorWaveView: View {
 
     var gameOverScreen: some View {
         VStack(spacing: 24) {
-            Text("GAME OVER").font(.system(size: 36, weight: .black)).foregroundColor(.white)
-            Text("Score: \(score)").font(.title.bold()).foregroundColor(.yellow)
+            Text("GAME OVER")
+                .font(.system(size: 36, weight: .black))
+                .foregroundColor(.white)
+                .shadow(color: .white.opacity(0.3), radius: 6)
+
+            glassPanel {
+                VStack(spacing: 12) {
+                    Text("Final Score").font(.caption.bold()).foregroundColor(.white.opacity(0.6))
+                    Text("\(score)").font(.system(size: 48, weight: .black)).foregroundColor(.yellow)
+                    let accuracy = recentResults.isEmpty ? 0 :
+                        Int(Double(recentResults.filter { $0 }.count) / Double(recentResults.count) * 100)
+                    Text("Accuracy: \(accuracy)%").foregroundColor(.white.opacity(0.7))
+                }.padding(24)
+            }.padding(.horizontal)
+
             Button(action: startGame) {
-                Text("PLAY AGAIN").font(.title2.bold())
-                    .foregroundColor(.black).padding(.horizontal, 48).padding(.vertical, 14)
-                    .background(Color.white).cornerRadius(30)
+                Text("PLAY AGAIN").font(.title2.bold()).foregroundColor(.white)
+                    .padding(.horizontal, 48).padding(.vertical, 14)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 30))
+                    .overlay(RoundedRectangle(cornerRadius: 30).stroke(.white.opacity(0.5), lineWidth: 1))
             }
             Button(action: { phase = .start }) {
-                Text("Menu").foregroundColor(.gray)
+                Text("Menu").foregroundColor(.white.opacity(0.5))
             }
         }
     }
@@ -129,9 +184,9 @@ struct ColorWaveView: View {
     // MARK: - Logic
 
     func startGame() {
-        score = 0; lives = 5; speed = 60.0
+        score = 0; lives = 5; speed = 60.0; recentResults = []
         bands = (0..<10).map { i in
-            ClWvBand(hue: Double(i) / 10.0, yOffset: CGFloat(i) * bandHeight)
+            ColorWaveBand(hue: Double(i) / 10.0, yOffset: CGFloat(i) * bandHeight)
         }
         targetHue = Double.random(in: 0...1)
         lastUpdate = Date()
@@ -158,14 +213,23 @@ struct ColorWaveView: View {
         guard let band = closestBand else { return }
         let diff = abs(band.hue - targetHue)
         let hueDiff = min(diff, 1.0 - diff)
-        if hueDiff < tolerance {
+        let isHit = hueDiff < tolerance
+
+        recentResults.append(isHit)
+        if recentResults.count > 10 { recentResults.removeFirst() }
+
+        // Adaptive difficulty: if last 5 had >4 hits, increase speed by ~20%
+        if recentResults.count >= 5 && recentResults.suffix(5).filter({ $0 }).count > 4 {
+            speed = min(speed * 1.2, 250)
+        }
+
+        if isHit {
             score += 2
-            speed = min(speed + 5, 200)
             targetHue = Double.random(in: 0...1)
             showFeedback("HIT! +2")
         } else {
             lives -= 1
-            showFeedback("MISS")
+            showFeedback("MISS -1")
             if lives <= 0 { phase = .gameOver }
         }
     }
